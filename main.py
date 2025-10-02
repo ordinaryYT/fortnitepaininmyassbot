@@ -7,6 +7,7 @@ import asyncio
 import os
 import discord
 from discord.ext import commands
+import re
 
 ANDROID_TOKEN = "M2Y2OWU1NmM3NjQ5NDkyYzhjYzI5ZjFhZjA4YThhMTI6YjUxZWU5Y2IxMjIzNGY1MGE2OWVmYTY3ZWY1MzgxMmU="
 LAUNCHER_TOKEN = "MzRhMDJjZjhmNDQxNGUyOWIxNTkyMTg3NmRhMzZmOWE6ZGFhZmJjY2M3Mzc3NDUwMzlkZmZlNTNkOTRmYzc2Y2Y="
@@ -36,10 +37,10 @@ class DontMessWithMMS:
                 async with session.get(url, headers=headers) as response:
                     data = await response.json()
                     buildVersion = data["elements"][0]["buildVersion"][:-8]
-                    return f"Fortnite/{buildVersion} Windows/10"
+                    return f"Fortnite/{buildVersion} Windows/10", buildVersion
         except Exception as e:
             print(f"Failed to get user agent: {e}")
-            return None
+            return None, None
 
     async def get_netcl(self):
         url = "https://fortnite-public-service-prod11.ol.epicgames.com/fortnite/api/matchmaking/session/matchMakingRequest"
@@ -90,6 +91,9 @@ class DontMessWithMMS:
             return None
 
     async def create_party(self):
+        user_agent, build_version = await self.get_user_agent()
+        if not build_version:
+            return None
         url = "https://party-service-prod.ol.epicgames.com/party/api/v1/parties"
         payload = {
             "Theme": "default",
@@ -111,8 +115,8 @@ class DontMessWithMMS:
                     "AccountID": self.client_id,
                     "Role": "LEADER",
                     "Platform": "WIN",
-                    "PlatformVersion": "++Fortnite+Release-31.10",
-                    "ProductVersion": "31.10-CL-XXXXXXX"
+                    "PlatformVersion": f"++Fortnite+Release-{build_version}",
+                    "ProductVersion": f"{build_version}-CL-XXXXXXX"
                 }
             ]
         }
@@ -121,8 +125,13 @@ class DontMessWithMMS:
             async with ClientSession() as session:
                 async with session.post(url, data=json.dumps(payload), headers=headers) as response:
                     data = await response.json()
-                    self.party_id = data['Id']
-                    return self.party_id
+                    if 'Id' in data:
+                        self.party_id = data['Id']
+                        print(f"Created new party ID: {self.party_id}")
+                        return self.party_id
+                    else:
+                        print(f"Party creation failed: {data}")
+                        return None
         except Exception as e:
             print(f"Failed to create party: {e}")
             return None
@@ -141,7 +150,7 @@ class DontMessWithMMS:
     async def generate_ticket(self):
         try:
             url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}?partyPlayerIds={self.account_ids}&bucketId={self.netcl}:1:{self.region}:{self.playlist}&player.platform=Windows&player.subregions=DE,GB,FR&player.option.linkCode={self.link_code}&player.option.fillTeam={self.fill}&player.option.preserveSquad=false&player.option.crossplayOptOut=false&player.option.partyId={self.party_id}&player.option.splitScreen=false&party.WIN=true&input.KBM=true&player.input=KBM&player.option.microphoneEnabled=true&player.option.uiLanguage=en"
-            headers = {"User-Agent": await self.get_user_agent(), "Authorization": f"bearer {self.bearer}"}
+            headers = {"User-Agent": (await self.get_user_agent())[0], "Authorization": f"bearer {self.bearer}"}
             async with ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
                     data = await response.json()
@@ -171,7 +180,7 @@ class DontMessWithMMS:
 
     async def check_matchmaking_ban(self):
         url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}"
-        headers = {"User-Agent": await self.get_user_agent(), "Authorization": f"bearer {self.bearer}"}
+        headers = {"User-Agent": (await self.get_user_agent())[0], "Authorization": f"bearer {self.bearer}"}
         async with ClientSession() as session:
             async with session.get(url, headers=headers) as response:
                 data = await response.json()
@@ -187,9 +196,16 @@ class DontMessWithMMS:
             is_banned = await self.check_matchmaking_ban()
             if is_banned:
                 return {"status": "error", "message": "The client is currently banned from matchmaking"}
-            self.party_id = await self.create_party()
+            if self.party_id:
+                # Validate party_id format (32-character hexadecimal UUID)
+                if not re.match(r'^[0-9a-fA-F]{32}$', self.party_id):
+                    print(f"Invalid party ID format: {self.party_id}")
+                    self.party_id = None
             if not self.party_id:
-                return {"status": "error", "message": "Failed to create party"}
+                self.party_id = await self.create_party()
+                if not self.party_id:
+                    return {"status": "error", "message": "Failed to create party"}
+            print(f"Using party ID: {self.party_id}")
             payload, signature = await self.generate_ticket()
             if not payload or not signature:
                 return {"status": "error", "message": "Failed to generate matchmaking ticket"}
@@ -210,7 +226,7 @@ async def on_ready():
     print(f"Bot logged in as {bot.user}")
 
 @bot.command(name='startcustom')
-async def start_custom(ctx, link_code=None):
+async def start_custom(ctx, link_code=None, party_id=None):
     if link_code is None:
         link_code = os.getenv("LINK_CODE", "abc123")
     if not (6 <= len(link_code) <= 12 and link_code.isalnum()):
@@ -223,6 +239,7 @@ async def start_custom(ctx, link_code=None):
         secret=os.getenv("SECRET"),
         playlist=os.getenv("PLAYLIST", "GamePlaylist_ShowdownAlt_Solo"),
         link_code=link_code,
+        party_id=party_id or os.getenv("PARTY_ID"),
         region=os.getenv("REGION", "EU"),
         fill=False
     )
@@ -235,7 +252,7 @@ async def health_check(request):
 
 app = web.Application()
 app.router.add_get('/health', health_check)
- 
+
 async def start_web_and_bot():
     runner = web.AppRunner(app)
     await runner.setup()
