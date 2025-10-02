@@ -1,4 +1,4 @@
-from aiohttp import ClientSession
+from aiohttp import ClientSession, web
 import websockets
 import hashlib
 import json
@@ -101,7 +101,7 @@ class DontMessWithMMS:
                 "AllowCrossPlay": True,
                 "AcceptInvites": True,
                 "ChatEnabled": True,
-                "SquadSize": 1  # Solo play
+                "SquadSize": 1
             },
             "Members": [
                 {
@@ -158,10 +158,13 @@ class DontMessWithMMS:
                 async for message in ws:
                     if ast.literal_eval(message)["name"] == "Play":
                         print("Matchmaking process successful.")
+                        return {"status": "success", "message": "Matchmaking process successful"}
                     else:
                         print(message)
+                        return {"status": "info", "message": message}
         except Exception as e:
             print(f"Failed to connect websocket: {e}")
+            return {"status": "error", "message": str(e)}
 
     async def check_matchmaking_ban(self):
         url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}"
@@ -175,40 +178,41 @@ class DontMessWithMMS:
         try:
             self.token_data = await self.create_token()
             if not self.token_data:
-                return print("Failed to authenticate.")
+                return {"status": "error", "message": "Failed to authenticate"}
             await self.client_credentials()
             await self.get_netcl()
             is_banned = await self.check_matchmaking_ban()
             if is_banned:
-                return print("The client is currently banned from matchmaking.")
+                return {"status": "error", "message": "The client is currently banned from matchmaking"}
             self.party_id = await self.create_party()
             if not self.party_id:
-                return print("Failed to create party.")
+                return {"status": "error", "message": "Failed to create party"}
             payload, signature = await self.generate_ticket()
             if not payload or not signature:
-                return print("Failed to generate matchmaking ticket.")
+                return {"status": "error", "message": "Failed to generate matchmaking ticket"}
             checksum = self.calculate_checksum(payload, signature)
             print("Connecting to WebSocket")
-            await self.connect_websocket(payload, signature, checksum)
+            return await self.connect_websocket(payload, signature, checksum)
         except Exception as e:
             print(f"An error occurred: {e}")
+            return {"status": "error", "message": str(e)}
 
-async def main():
-    while True:
-        try:
-            mms = DontMessWithMMS(
-                account_ids=["ced24960d641410390aef731202c0ae2"],
-                client_id="ced24960d641410390aef731202c0ae2",
-                device_id="87fd14d15b954a839a9e474b8fed3eb3",
-                secret="JWYNULQL35NGEO4QLYE24W6IN2TZJYNW",
-                playlist="GamePlaylist_Solo",
-                region="EU",
-                fill=False
-            )
-            await mms.start()
-        except Exception as e:
-            print(f"Main loop error: {e}")
-        await asyncio.sleep(60)  # Retry every 60 seconds
+async def start_matchmaking(request):
+    mms = DontMessWithMMS(
+        account_ids=["ced24960d641410390aef731202c0ae2"],
+        client_id="ced24960d641410390aef731202c0ae2",
+        device_id="87fd14d15b954a839a9e474b8fed3eb3",
+        secret=os.getenv("SECRET"),
+        playlist=os.getenv("PLAYLIST", "GamePlaylist_Solo"),
+        region=os.getenv("REGION", "EU"),
+        fill=False
+    )
+    result = await mms.start()
+    return web.json_response(result)
+
+app = web.Application()
+app.router.add_get('/start', start_matchmaking)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    port = int(os.getenv("PORT", 10000))
+    web.run_app(app, port=port)
