@@ -16,6 +16,8 @@ services:
         sync: false  # Set manually in Render Dashboard
       - key: LINK_CODE
         sync: false  # Set manually in Render Dashboard
+      - key: PARTY_ID
+        sync: false  # Set manually in Render Dashboard
       - key: PLAYLIST
         value: GamePlaylist_ShowdownAlt_Solo
       - key: REGION
