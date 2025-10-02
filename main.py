@@ -30,14 +30,19 @@ class DontMessWithMMS:
         self.link_code = kwargs.pop('link_code', None)
 
     async def get_user_agent(self):
-        url = "https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/public/assets/v2/platform/Windows/namespace/fn/catalogItem/4fe75bbc5a674f4f9b356b5c90567da5/app/Fortnite/label/Live"
+        # Updated endpoint for 2025 Fortnite Live build
+        url = "https://launcher-public-service-prod08.ol.epicgames.com/Fortnite/api/game/v2/fortnite/platform/Windows/namespace/fn/catalogItem/4fe75bbc5a674f4f9b356b5c90567da5/app/Fortnite/label/Live"
         headers = {"Authorization": f"bearer {self.client_credentials_token}"}
         try:
             async with ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
-                    data = await response.json()
-                    buildVersion = data["elements"][0]["buildVersion"][:-8]
-                    return f"Fortnite/{buildVersion} Windows/10", buildVersion
+                    if response.status == 200:
+                        data = await response.json()
+                        buildVersion = data["elements"][0]["buildVersion"][:-8]  # Strip timestamp
+                        return f"Fortnite/{buildVersion} Windows/10", buildVersion
+                    else:
+                        print(f"User agent fetch failed: {response.status} - {await response.text()}")
+                        return None, None
         except Exception as e:
             print(f"Failed to get user agent: {e}")
             return None, None
@@ -93,6 +98,7 @@ class DontMessWithMMS:
     async def create_party(self):
         user_agent, build_version = await self.get_user_agent()
         if not build_version:
+            print("Could not fetch build version for party creation")
             return None
         url = "https://party-service-prod.ol.epicgames.com/party/api/v1/parties"
         payload = {
@@ -108,7 +114,7 @@ class DontMessWithMMS:
                 "AllowCrossPlay": True,
                 "AcceptInvites": True,
                 "ChatEnabled": True,
-                "SquadSize": 1
+                "SquadSize": 1  # Change to 2/4 for duos/squads
             },
             "Members": [
                 {
@@ -116,7 +122,7 @@ class DontMessWithMMS:
                     "Role": "LEADER",
                     "Platform": "WIN",
                     "PlatformVersion": f"++Fortnite+Release-{build_version}",
-                    "ProductVersion": f"{build_version}-CL-XXXXXXX"
+                    "ProductVersion": f"{build_version}-CL-1234567"  # Updated format for 2025; CL-XXXXXXX placeholder
                 }
             ]
         }
@@ -124,13 +130,14 @@ class DontMessWithMMS:
         try:
             async with ClientSession() as session:
                 async with session.post(url, data=json.dumps(payload), headers=headers) as response:
-                    data = await response.json()
-                    if 'Id' in data:
+                    if response.status == 200:
+                        data = await response.json()
                         self.party_id = data['Id']
-                        print(f"Created new party ID: {self.party_id}")
+                        print(f"Created new party ID: {self.party_id} (build: {build_version})")
                         return self.party_id
                     else:
-                        print(f"Party creation failed: {data}")
+                        error_text = await response.text()
+                        print(f"Party creation failed: {response.status} - {error_text}")
                         return None
         except Exception as e:
             print(f"Failed to create party: {e}")
@@ -153,10 +160,15 @@ class DontMessWithMMS:
             headers = {"User-Agent": (await self.get_user_agent())[0], "Authorization": f"bearer {self.bearer}"}
             async with ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
-                    data = await response.json()
-                    payload = data['payload']
-                    signature = data['signature']
-                    return payload, signature
+                    if response.status == 200:
+                        data = await response.json()
+                        payload = data['payload']
+                        signature = data['signature']
+                        return payload, signature
+                    else:
+                        error_text = await response.text()
+                        print(f"Ticket generation failed: {response.status} - {error_text}")
+                        return None, None
         except Exception as e:
             print(f"Failed to generate ticket: {e}")
             return None, None
@@ -170,7 +182,7 @@ class DontMessWithMMS:
                 async for message in ws:
                     if ast.literal_eval(message)["name"] == "Play":
                         print("Matchmaking process successful.")
-                        return {"status": "success", "message": f"Custom match started with link code: {self.link_code}"}
+                        return {"status": "success", "message": f"Custom match started with link code: {self.link_code} (party: {self.party_id})"}
                     else:
                         print(message)
                         return {"status": "info", "message": message}
@@ -196,16 +208,10 @@ class DontMessWithMMS:
             is_banned = await self.check_matchmaking_ban()
             if is_banned:
                 return {"status": "error", "message": "The client is currently banned from matchmaking"}
-            if self.party_id:
-                # Validate party_id format (32-character hexadecimal UUID)
-                if not re.match(r'^[0-9a-fA-F]{32}$', self.party_id):
-                    print(f"Invalid party ID format: {self.party_id}")
-                    self.party_id = None
+            # Generate fresh party each time (no static ID)
+            self.party_id = await self.create_party()
             if not self.party_id:
-                self.party_id = await self.create_party()
-                if not self.party_id:
-                    return {"status": "error", "message": "Failed to create party"}
-            print(f"Using party ID: {self.party_id}")
+                return {"status": "error", "message": "Failed to create party"}
             payload, signature = await self.generate_ticket()
             if not payload or not signature:
                 return {"status": "error", "message": "Failed to generate matchmaking ticket"}
@@ -226,7 +232,7 @@ async def on_ready():
     print(f"Bot logged in as {bot.user}")
 
 @bot.command(name='startcustom')
-async def start_custom(ctx, link_code=None, party_id=None):
+async def start_custom(ctx, link_code=None):
     if link_code is None:
         link_code = os.getenv("LINK_CODE", "abc123")
     if not (6 <= len(link_code) <= 12 and link_code.isalnum()):
@@ -237,9 +243,8 @@ async def start_custom(ctx, link_code=None, party_id=None):
         client_id="ced24960d641410390aef731202c0ae2",
         device_id="87fd14d15b954a839a9e474b8fed3eb3",
         secret=os.getenv("SECRET"),
-        playlist=os.getenv("PLAYLIST", "GamePlaylist_ShowdownAlt_Solo"),
+        playlist=os.getenv("PLAYLIST", "NeonCustomsSolo"),  # Updated for 2025 customs
         link_code=link_code,
-        party_id=party_id or os.getenv("PARTY_ID"),
         region=os.getenv("REGION", "EU"),
         fill=False
     )
