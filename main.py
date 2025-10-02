@@ -5,6 +5,8 @@ import json
 import ast
 import asyncio
 import os
+import discord
+from discord.ext import commands
 
 ANDROID_TOKEN = "M2Y2OWU1NmM3NjQ5NDkyYzhjYzI5ZjFhZjA4YThhMTI6YjUxZWU5Y2IxMjIzNGY1MGE2OWVmYTY3ZWY1MzgxMmU="
 LAUNCHER_TOKEN = "MzRhMDJjZjhmNDQxNGUyOWIxNTkyMTg3NmRhMzZmOWE6ZGFhZmJjY2M3Mzc3NDUwMzlkZmZlNTNkOTRmYzc2Y2Y="
@@ -24,6 +26,7 @@ class DontMessWithMMS:
         self.netcl = kwargs.pop('netcl', None)
         self.device_id = kwargs.pop('device_id', None)
         self.secret = kwargs.pop('secret', None)
+        self.link_code = kwargs.pop('link_code', None)
 
     async def get_user_agent(self):
         url = "https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/public/assets/v2/platform/Windows/namespace/fn/catalogItem/4fe75bbc5a674f4f9b356b5c90567da5/app/Fortnite/label/Live"
@@ -137,7 +140,7 @@ class DontMessWithMMS:
 
     async def generate_ticket(self):
         try:
-            url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}?partyPlayerIds={self.account_ids}&bucketId={self.netcl}:1:{self.region}:{self.playlist}&player.platform=Windows&player.subregions=DE,GB,FR&player.option.linkCode={self.playlist}&player.option.fillTeam={self.fill}&player.option.preserveSquad=false&player.option.crossplayOptOut=false&player.option.partyId={self.party_id}&player.option.splitScreen=false&party.WIN=true&input.KBM=true&player.input=KBM&player.option.microphoneEnabled=true&player.option.uiLanguage=en"
+            url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}?partyPlayerIds={self.account_ids}&bucketId={self.netcl}:1:{self.region}:{self.playlist}&player.platform=Windows&player.subregions=DE,GB,FR&player.option.linkCode={self.link_code}&player.option.fillTeam={self.fill}&player.option.preserveSquad=false&player.option.crossplayOptOut=false&player.option.partyId={self.party_id}&player.option.splitScreen=false&party.WIN=true&input.KBM=true&player.input=KBM&player.option.microphoneEnabled=true&player.option.uiLanguage=en"
             headers = {"User-Agent": await self.get_user_agent(), "Authorization": f"bearer {self.bearer}"}
             async with ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
@@ -158,7 +161,7 @@ class DontMessWithMMS:
                 async for message in ws:
                     if ast.literal_eval(message)["name"] == "Play":
                         print("Matchmaking process successful.")
-                        return {"status": "success", "message": "Matchmaking process successful"}
+                        return {"status": "success", "message": f"Custom match started with link code: {self.link_code}"}
                     else:
                         print(message)
                         return {"status": "info", "message": message}
@@ -197,22 +200,48 @@ class DontMessWithMMS:
             print(f"An error occurred: {e}")
             return {"status": "error", "message": str(e)}
 
-async def start_matchmaking(request):
+# Discord Bot Setup
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+@bot.event
+async def on_ready():
+    print(f"Bot logged in as {bot.user}")
+
+@bot.command(name='startcustom')
+async def start_custom(ctx, link_code=None):
+    if link_code is None:
+        link_code = os.getenv("LINK_CODE", "abc123")
+    if not (6 <= len(link_code) <= 12 and link_code.isalnum()):
+        await ctx.send("Error: Link code must be 6-12 alphanumeric characters.")
+        return
     mms = DontMessWithMMS(
         account_ids=["ced24960d641410390aef731202c0ae2"],
         client_id="ced24960d641410390aef731202c0ae2",
         device_id="87fd14d15b954a839a9e474b8fed3eb3",
         secret=os.getenv("SECRET"),
-        playlist=os.getenv("PLAYLIST", "GamePlaylist_Solo"),
+        playlist=os.getenv("PLAYLIST", "GamePlaylist_ShowdownAlt_Solo"),
+        link_code=link_code,
         region=os.getenv("REGION", "EU"),
         fill=False
     )
     result = await mms.start()
-    return web.json_response(result)
+    await ctx.send(f"Custom match status: {result['message']}")
+
+# Web Server to Keep Render Happy
+async def health_check(request):
+    return web.json_response({"status": "ok"})
 
 app = web.Application()
-app.router.add_get('/start', start_matchmaking)
+app.router.add_get('/health', health_check)
+ 
+async def start_web_and_bot():
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000)))
+    await site.start()
+    await bot.start(os.getenv("DISCORD_TOKEN"))
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 10000))
-    web.run_app(app, port=port)
+    asyncio.run(start_web_and_bot())
