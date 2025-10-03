@@ -6,7 +6,7 @@ import ast
 import asyncio
 import os
 import discord
-from discord.ext import commands
+from discord.ext = commands
 
 ANDROID_TOKEN = "M2Y2OWU1NmM3NjQ5NDkyYzhjYzI5ZjFhZjA4YThhMTI6YjUxZWU5Y2IxMjIzNGY1MGE2OWVmYTY3ZWY1MzgxMmU="
 LAUNCHER_TOKEN = "MzRhMDJjZjhmNDQxNGUyOWIxNTkyMTg3NmRhMzZmOWE6ZGFhZmJjY2M3Mzc3NDUwMzlkZmZlNTNkOTRmYzc2Y2Y="
@@ -29,8 +29,7 @@ class DontMessWithMMS:
         self.link_code = kwargs.pop('link_code', None)
 
     async def get_user_agent(self):
-        # Updated endpoint for 2025
-        url = "https://launcher-public-service-prod.ol.epicgames.com/Fortnite/api/game/v2/fortnite/platform/Windows/namespace/fn/catalogItem/4fe75bbc5a674f4f9b356b5c90567da5/app/Fortnite/label/Live"
+        url = "https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/public/assets/v2/platform/Windows/namespace/fn/catalogItem/4fe75bbc5a674f4f9b356b5c90567da5/app/Fortnite/label/Live"
         headers = {"Authorization": f"bearer {self.client_credentials_token}"}
         for attempt in range(3):
             try:
@@ -50,9 +49,9 @@ class DontMessWithMMS:
             except Exception as e:
                 print(f"User agent exception (attempt {attempt + 1}): {e}")
                 await asyncio.sleep(5 * (attempt + 1))
-        # Fallback build version for 2025
-        print("Using fallback build version: 37.40")
-        return "Fortnite/37.40 Windows/10", "37.40"
+        # Fallback to current 2025 build version
+        print("Using fallback build version: 37.30")
+        return "Fortnite/37.30 Windows/10", "37.30"
 
     async def get_netcl(self):
         url = "https://fortnite-public-service-prod11.ol.epicgames.com/fortnite/api/matchmaking/session/matchMakingRequest"
@@ -300,7 +299,7 @@ async def start_custom(ctx, link_code=None):
     if not (6 <= len(link_code) <= 12 and link_code.isalnum()):
         await ctx.send("Error: Link code must be 6-12 alphanumeric characters.")
         return
-    playlist = os.getenv("PLAYLIST", "NeonCustomsSolo")
+    playlist = os.getenv("PLAYLIST", "Playlist_ShowdownAlt_Solo")
     mms = DontMessWithMMS(
         account_ids=["ced24960d641410390aef731202c0ae2"],
         client_id="ced24960d641410390aef731202c0ae2",
