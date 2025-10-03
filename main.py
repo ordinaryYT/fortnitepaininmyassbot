@@ -6,7 +6,7 @@ import ast
 import asyncio
 import os
 import discord
-from discord.ext = commands
+from discord.ext import commands
 
 ANDROID_TOKEN = "M2Y2OWU1NmM3NjQ5NDkyYzhjYzI5ZjFhZjA4YThhMTI6YjUxZWU5Y2IxMjIzNGY1MGE2OWVmYTY3ZWY1MzgxMmU="
 LAUNCHER_TOKEN = "MzRhMDJjZjhmNDQxNGUyOWIxNTkyMTg3NmRhMzZmOWE6ZGFhZmJjY2M3Mzc3NDUwMzlkZmZlNTNkOTRmYzc2Y2Y="
@@ -216,7 +216,7 @@ class DontMessWithMMS:
                         return payload, signature
                     else:
                         error_text = await response.text()
-                        print(f"Ticket generation failed: {response.status} - {error_text}")
+                        print(f"Ticket generation failed: {response.status} - {await response.text()}")
                         return None, None
         except Exception as e:
             print(f"Failed to generate ticket: {e}")
