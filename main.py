@@ -36,14 +36,22 @@ class DontMessWithMMS:
         self.client_credentials_token = None
         self.netcl = None
 
-        # Dynamic User-Agent (Epic checks this)
-        self.user_agent = f"Fortnite/++Fortnite+Release-37.30-CL-{self.netcl or '45716758'} Windows/10"
+        # Fortnite client auth (base64 client_id:client_secret)
+        self.fortnite_auth = os.getenv("FORTNITE_AUTH")
+
+        # User-Agent template (will update when netcl is fetched)
+        self.user_agent = f"Fortnite/++Fortnite+Release-37.30-CL-0 Windows/10"
 
     async def create_token(self):
+        """Get bearer token using Device Auth"""
+        if not self.fortnite_auth:
+            logger.error("FORTNITE_AUTH env var not set. Cannot authenticate.")
+            return None
+
         url = "https://account-public-service-prod.ol.epicgames.com/account/api/oauth/token"
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "Authorization": f"basic {self.secret}"
+            "Authorization": f"basic {self.fortnite_auth}"
         }
         data = {
             "grant_type": "device_auth",
@@ -61,13 +69,22 @@ class DontMessWithMMS:
                     logger.info("Fetched bearer token")
                     return data
                 else:
-                    logger.error("Token creation failed: " + await resp.text())
+                    error_body = await resp.text()
+                    logger.error("Token creation failed: " + error_body)
                     return None
 
     async def client_credentials(self):
+        """Get client credentials token"""
+        if not self.fortnite_auth:
+            logger.error("FORTNITE_AUTH env var not set. Cannot authenticate client credentials.")
+            return
+
         url = "https://account-public-service-prod.ol.epicgames.com/account/api/oauth/token"
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": f"basic {self.fortnite_auth}"
+        }
         data = {"grant_type": "client_credentials"}
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
         async with aiohttp.ClientSession() as session:
             async with session.post(url, data=data, headers=headers) as resp:
                 logger.info(f"Client credentials: status {resp.status}")
@@ -76,22 +93,31 @@ class DontMessWithMMS:
                     self.client_credentials_token = data.get("access_token")
                     logger.info("Fetched client credentials token")
                 else:
-                    logger.error("Client credentials failed: " + await resp.text())
+                    error_body = await resp.text()
+                    logger.error("Client credentials failed: " + error_body)
 
     async def get_netcl(self):
+        """Fetch NetCL build number for current Fortnite version"""
         url = "https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/version"
-        headers = {"User-Agent": self.user_agent, "Authorization": f"bearer {self.bearer}"}
+        headers = {"Authorization": f"bearer {self.bearer}"}
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as resp:
                 logger.info(f"Netcl fetch attempt 1: status {resp.status}")
                 if resp.status == 200:
                     data = await resp.json()
-                    return data.get("cln") or data.get("build")
+                    netcl = data.get("cln") or data.get("build")
+                    if netcl:
+                        self.netcl = netcl
+                        # Update User-Agent with real build number
+                        self.user_agent = f"Fortnite/++Fortnite+Release-37.30-CL-{netcl} Windows/10"
+                    return netcl
                 else:
-                    logger.error("Netcl fetch failed: " + await resp.text())
+                    error_body = await resp.text()
+                    logger.error("Netcl fetch failed: " + error_body)
                     return None
 
     async def set_presence(self):
+        """Try to set presence (not critical but recommended)"""
         url1 = f"https://presence-public-service-prod.ol.epicgames.com/presence/api/v1/fortnite/{self.client_id}/presence"
         url2 = f"https://presence-public-service-prod.ol.epicgames.com/presence/api/v1/_/{self.client_id}/presence"
         headers = {
@@ -100,14 +126,12 @@ class DontMessWithMMS:
         }
         payload = {"status": "online", "isPlaying": True, "isJoinable": True}
         async with aiohttp.ClientSession() as session:
-            # Try fortnite namespace
             async with session.post(url1, headers=headers, json=payload) as resp1:
                 logger.info(f"Presence update attempt at {url1} -> status {resp1.status}")
                 if resp1.status == 200:
                     return True
                 else:
                     logger.error(f"Presence endpoint {url1} returned {resp1.status}: {await resp1.text()}")
-            # Try fallback namespace
             async with session.put(url2, headers=headers, json=payload) as resp2:
                 logger.info(f"Presence update attempt at {url2} with PUT -> status {resp2.status}")
                 if resp2.status == 200:
@@ -274,7 +298,7 @@ async def start_custom(ctx, link_code=None, party_id=None):
     playlist = os.getenv("PLAYLIST", "playlist_defaultsolo")
     mms = DontMessWithMMS(
         account_ids=[os.getenv("ACCOUNT_ID", "ced24960d641410390aef731202c0ae2")],
-        client_id=os.getenv("CLIENT_ID", "ced24960d641410390aef731202c0ae2"),
+        client_id=os.getenv("ACCOUNT_ID", "ced24960d641410390aef731202c0ae2"),
         device_id=os.getenv("DEVICE_ID", "87fd14d15b954a839a9e474b8fed3eb3"),
         secret=os.getenv("SECRET"),
         playlist=playlist,
