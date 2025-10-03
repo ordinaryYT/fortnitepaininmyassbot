@@ -1,4 +1,5 @@
 import aiohttp
+from aiohttp.web import Application
 import websockets
 import hashlib
 import json
@@ -347,15 +348,15 @@ async def start_custom(ctx, link_code=None):
 # Web Server to Keep Render Happy
 async def health_check(request):
     logger.info("Health check requested")
-    return web.json_response({"status": "ok"})
+    return aiohttp.web.json_response({"status": "ok"})
 
-app = web.Application()
+app = Application()
 app.router.add_get('/health', health_check)
 
 async def start_web_and_bot():
-    runner = web.AppRunner(app)
+    runner = aiohttp.web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000)))
+    site = aiohttp.web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000)))
     await site.start()
     logger.info("Web server started")
     await bot.start(os.getenv("DISCORD_TOKEN"))
