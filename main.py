@@ -1,4 +1,4 @@
-from aiohttp import ClientSession, web
+import aiohttp
 import websockets
 import hashlib
 import json
@@ -7,6 +7,18 @@ import asyncio
 import os
 import discord
 from discord.ext import commands
+import logging
+
+# Configure logging for Render
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('app.log')  # Save logs to file for Render
+    ]
+)
+logger = logging.getLogger(__name__)
 
 ANDROID_TOKEN = "M2Y2OWU1NmM3NjQ5NDkyYzhjYzI5ZjFhZjA4YThhMTI6YjUxZWU5Y2IxMjIzNGY1MGE2OWVmYTY3ZWY1MzgxMmU="
 LAUNCHER_TOKEN = "MzRhMDJjZjhmNDQxNGUyOWIxNTkyMTg3NmRhMzZmOWE6ZGFhZmJjY2M3Mzc3NDUwMzlkZmZlNTNkOTRmYzc2Y2Y="
@@ -27,31 +39,7 @@ class DontMessWithMMS:
         self.device_id = kwargs.pop('device_id', None)
         self.secret = kwargs.pop('secret', None)
         self.link_code = kwargs.pop('link_code', None)
-
-    async def get_user_agent(self):
-        url = "https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/public/assets/v2/platform/Windows/namespace/fn/catalogItem/4fe75bbc5a674f4f9b356b5c90567da5/app/Fortnite/label/Live"
-        headers = {"Authorization": f"bearer {self.client_credentials_token}"}
-        for attempt in range(3):
-            try:
-                async with ClientSession() as session:
-                    async with session.get(url, headers=headers) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            buildVersion = data["elements"][0]["buildVersion"][:-8]
-                            print(f"Fetched build version: {buildVersion}")
-                            return f"Fortnite/{buildVersion} Windows/10", buildVersion
-                        else:
-                            print(f"User agent fetch failed: {response.status} - {await response.text()}")
-                            if response.status == 429:
-                                await asyncio.sleep(5 * (attempt + 1))
-                            else:
-                                break
-            except Exception as e:
-                print(f"User agent exception (attempt {attempt + 1}): {e}")
-                await asyncio.sleep(5 * (attempt + 1))
-        # Fallback to current 2025 build version
-        print("Using fallback build version: 37.30")
-        return "Fortnite/37.30 Windows/10", "37.30"
+        self.build_version = "37.30"  # Hardcoded for 2025 stability
 
     async def get_netcl(self):
         url = "https://fortnite-public-service-prod11.ol.epicgames.com/fortnite/api/matchmaking/session/matchMakingRequest"
@@ -59,21 +47,23 @@ class DontMessWithMMS:
         headers = {"Authorization": f"bearer {self.bearer}", "Content-Type": "application/json"}
         for attempt in range(3):
             try:
-                async with ClientSession() as session:
-                    async with session.post(url, data=json.dumps(payload), headers=headers) as response:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload, headers=headers) as response:
+                        logger.info(f"Netcl fetch attempt {attempt + 1}: status {response.status}")
                         if response.status == 200:
                             data = await response.json()
                             self.netcl = data[0]["buildUniqueId"]
-                            print(f"Fetched netcl: {self.netcl}")
+                            logger.info(f"Fetched netcl: {self.netcl}")
                             return self.netcl
                         else:
-                            print(f"Netcl fetch failed: {response.status} - {await response.text()}")
+                            error_text = await response.text()
+                            logger.error(f"Netcl fetch failed: {response.status} - {error_text}")
                             if response.status == 429:
                                 await asyncio.sleep(5 * (attempt + 1))
                             else:
                                 break
             except Exception as e:
-                print(f"Failed to get netcl (attempt {attempt + 1}): {e}")
+                logger.error(f"Failed to get netcl (attempt {attempt + 1}): {e}")
                 await asyncio.sleep(5 * (attempt + 1))
         return None
 
@@ -83,21 +73,23 @@ class DontMessWithMMS:
         headers = {"Authorization": f"Basic {LAUNCHER_TOKEN}", "Content-Type": "application/x-www-form-urlencoded"}
         for attempt in range(3):
             try:
-                async with ClientSession() as session:
+                async with aiohttp.ClientSession() as session:
                     async with session.post(url, data=payload, headers=headers) as response:
+                        logger.info(f"Client credentials attempt {attempt + 1}: status {response.status}")
                         if response.status == 200:
                             data = await response.json()
                             self.client_credentials_token = data['access_token']
-                            print("Fetched client credentials token")
+                            logger.info("Fetched client credentials token")
                             return data
                         else:
-                            print(f"Client credentials failed: {response.status} - {await response.text()}")
+                            error_text = await response.text()
+                            logger.error(f"Client credentials failed: {response.status} - {error_text}")
                             if response.status == 429:
                                 await asyncio.sleep(5 * (attempt + 1))
                             else:
                                 break
             except Exception as e:
-                print(f"Failed to get client credentials (attempt {attempt + 1}): {e}")
+                logger.error(f"Failed to get client credentials (attempt {attempt + 1}): {e}")
                 await asyncio.sleep(5 * (attempt + 1))
         return None
 
@@ -112,81 +104,97 @@ class DontMessWithMMS:
         headers = {"Authorization": f"Basic {ANDROID_TOKEN}", "Content-Type": "application/x-www-form-urlencoded"}
         for attempt in range(3):
             try:
-                async with ClientSession() as session:
+                async with aiohttp.ClientSession() as session:
                     async with session.post(url, data=payload, headers=headers) as response:
+                        logger.info(f"Token creation attempt {attempt + 1}: status {response.status}")
                         if response.status == 200:
                             data = await response.json()
                             self.bearer = data['access_token']
                             self.client_id = data['account_id']
-                            print("Fetched bearer token")
+                            logger.info("Fetched bearer token")
                             return data
                         else:
-                            print(f"Token creation failed: {response.status} - {await response.text()}")
+                            error_text = await response.text()
+                            logger.error(f"Token creation failed: {response.status} - {error_text}")
                             if response.status == 429:
                                 await asyncio.sleep(5 * (attempt + 1))
                             else:
                                 break
             except Exception as e:
-                print(f"Failed to get access token (attempt {attempt + 1}): {e}")
+                logger.error(f"Failed to get access token (attempt {attempt + 1}): {e}")
                 await asyncio.sleep(5 * (attempt + 1))
         return None
 
     async def create_party(self):
-        user_agent, build_version = await self.get_user_agent()
-        if not build_version:
-            print("Could not fetch build version for party creation")
-            return None
-        url = "https://party-service-prod.ol.epicgames.com/party/api/v1/parties"
+        url = "https://party-service-prod01.ol.epicgames.com/party/api/v1/parties"
         payload = {
-            "Theme": "default",
-            "Sentinel": {
-                "SentinelPlatform": "Windows",
-                "SentinelPlatformType": "PC",
-                "SentinelVersion": 1
+            "config": {
+                "join_confirmation": False,
+                "joinability": "OPEN",
+                "max_size": 16,
+                "chat_enabled": True,
+                "discoverability": "ALL",
+                "sub_type": "default",
+                "type": "DEFAULT",
+                "invite_ttl_seconds": 14400,
+                "join_in_progress_enabled": True
             },
-            "Config": {
-                "JoinInProgress": True,
-                "JoinInProgressLock": False,
-                "AllowCrossPlay": True,
-                "AcceptInvites": True,
-                "ChatEnabled": True,
-                "SquadSize": 1
-            },
-            "Members": [
+            "members": [
                 {
-                    "AccountID": self.client_id,
-                    "Role": "LEADER",
-                    "Platform": "WIN",
-                    "PlatformVersion": f"++Fortnite+Release-{build_version}",
-                    "ProductVersion": f"{build_version}-CL-1234567"
+                    "account_id": self.client_id,
+                    "meta": {
+                        "urn:epic:member:dn_s": self.client_id,
+                        "urn:epic:member:platform_s": "WIN",
+                        "urn:epic:member:platform_version_s": f"++Fortnite+Release-{self.build_version}",
+                        "urn:epic:member:build_s": f"{self.build_version}-CL-1234567"
+                    },
+                    "role": "CAPTAIN",
+                    "revision": 0,
+                    "connection": {
+                        "id": self.client_id,
+                        "connected_at": "2025-10-03T00:00:00.000Z",
+                        "meta": {
+                            "urn:epic:conn:platform_s": "WIN",
+                            "urn:epic:conn:build_s": f"{self.build_version}-CL-1234567"
+                        }
+                    }
                 }
-            ]
+            ],
+            "meta": {
+                "urn:epic:cfg:build-id_s": f"{self.build_version}-CL-1234567",
+                "urn:epic:cfg:privacy_s": "PUBLIC"
+            }
         }
-        headers = {"Authorization": f"bearer {self.bearer}", "Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"bearer {self.bearer}",
+            "Content-Type": "application/json",
+            "User-Agent": f"Fortnite/37.30 Windows/10"
+        }
         for attempt in range(3):
             try:
-                async with ClientSession() as session:
-                    async with session.post(url, data=json.dumps(payload), headers=headers) as response:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload, headers=headers) as response:
+                        logger.info(f"Party creation attempt {attempt + 1}: status {response.status}")
                         if response.status == 200:
                             data = await response.json()
-                            self.party_id = data['Id']
-                            print(f"Created new party ID: {self.party_id} (build: {build_version})")
+                            self.party_id = data['id']
+                            logger.info(f"Created new party ID: {self.party_id} (build: {self.build_version})")
                             return self.party_id
                         else:
                             error_text = await response.text()
-                            print(f"Party creation failed: {response.status} - {error_text}")
+                            logger.error(f"Party creation failed: {response.status} - {error_text}")
                             if response.status == 429:
                                 await asyncio.sleep(5 * (attempt + 1))
                             else:
                                 break
             except Exception as e:
-                print(f"Failed to create party (attempt {attempt + 1}): {e}")
+                logger.error(f"Failed to create party (attempt {attempt + 1}): {e}")
                 await asyncio.sleep(5 * (attempt + 1))
         return None
 
     def calculate_checksum(self, ticket_payload, signature):
         if not ticket_payload or not signature:
-            print("Cannot calculate checksum: ticket_payload or signature is None")
+            logger.error("Cannot calculate checksum: ticket_payload or signature is None")
             return None
         try:
             plaintext = ticket_payload[10:20] + "Don'tMessWithMMS" + signature[2:10]
@@ -195,92 +203,108 @@ class DontMessWithMMS:
             checksum = sha1_hash[2:10].hex().upper()
             return checksum
         except Exception as e:
-            print(f"Failed to calculate checksum: {e}")
+            logger.error(f"Failed to calculate checksum: {e}")
             return None
 
     async def generate_ticket(self):
         if not all([self.client_id, self.netcl, self.party_id, self.bearer, self.link_code, self.playlist, self.region]):
             missing = [k for k, v in {"client_id": self.client_id, "netcl": self.netcl, "party_id": self.party_id, "bearer": self.bearer, "link_code": self.link_code, "playlist": self.playlist, "region": self.region}.items() if not v]
-            print(f"Cannot generate ticket: missing fields {missing}")
+            logger.error(f"Cannot generate ticket: missing fields {missing}")
             return None, None
         try:
             url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}?partyPlayerIds={self.account_ids}&bucketId={self.netcl}:1:{self.region}:{self.playlist}&player.platform=Windows&player.subregions=DE,GB,FR&player.option.linkCode={self.link_code}&player.option.fillTeam={self.fill}&player.option.preserveSquad=false&player.option.crossplayOptOut=false&player.option.partyId={self.party_id}&player.option.splitScreen=false&party.WIN=true&input.KBM=true&player.input=KBM&player.option.microphoneEnabled=true&player.option.uiLanguage=en"
-            headers = {"User-Agent": (await self.get_user_agent())[0], "Authorization": f"bearer {self.bearer}"}
-            async with ClientSession() as session:
+            headers = {
+                "User-Agent": f"Fortnite/37.30 Windows/10",
+                "Authorization": f"bearer {self.bearer}"
+            }
+            async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
+                    logger.info(f"Ticket generation attempt: status {response.status}")
                     if response.status == 200:
                         data = await response.json()
                         payload = data['payload']
                         signature = data['signature']
-                        print("Generated matchmaking ticket")
+                        logger.info("Generated matchmaking ticket")
                         return payload, signature
                     else:
                         error_text = await response.text()
-                        print(f"Ticket generation failed: {response.status} - {await response.text()}")
+                        logger.error(f"Ticket generation failed: {response.status} - {error_text}")
                         return None, None
         except Exception as e:
-            print(f"Failed to generate ticket: {e}")
+            logger.error(f"Failed to generate ticket: {e}")
             return None, None
 
     async def connect_websocket(self, payload, signature, checksum):
         if not all([payload, signature, checksum]):
-            print(f"Cannot connect WebSocket: invalid inputs (payload: {payload}, signature: {signature}, checksum: {checksum})")
+            logger.error(f"Cannot connect WebSocket: invalid inputs (payload: {payload}, signature: {signature}, checksum: {checksum})")
             return {"status": "error", "message": "Invalid ticket data"}
         headers = {"Authorization": f"Epic-Signed mms-player {payload} {signature} {checksum}"}
         uri = f"wss://fortnite-matchmaking-public-service-live-{self.region}.ol.epicgames.com:443"
         try:
             async with websockets.connect(uri, extra_headers=headers) as ws:
-                print("WebSocket connection opened")
+                logger.info("WebSocket connection opened")
                 async for message in ws:
                     parsed = ast.literal_eval(message)
                     if parsed["name"] == "Play":
-                        print("Matchmaking process successful")
+                        logger.info("Matchmaking process successful")
                         return {"status": "success", "message": f"Custom match started with link code: {self.link_code} (party: {self.party_id})"}
                     else:
-                        print(f"WebSocket message: {message}")
+                        logger.info(f"WebSocket message: {message}")
                         return {"status": "info", "message": message}
         except Exception as e:
-            print(f"Failed to connect websocket: {e}")
+            logger.error(f"Failed to connect websocket: {e}")
             return {"status": "error", "message": str(e)}
 
     async def check_matchmaking_ban(self):
         url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}"
-        headers = {"User-Agent": (await self.get_user_agent())[0], "Authorization": f"bearer {self.bearer}"}
+        headers = {
+            "User-Agent": f"Fortnite/37.30 Windows/10",
+            "Authorization": f"bearer {self.bearer}"
+        }
         try:
-            async with ClientSession() as session:
+            async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
+                    logger.info(f"Ban check: status {response.status}")
                     data = await response.json()
                     return data.get("errorCode", None) == "errors.com.epicgames.fortnite.player_banned_from_sub_game"
         except Exception as e:
-            print(f"Failed to check ban status: {e}")
+            logger.error(f"Failed to check ban status: {e}")
             return False
 
     async def start(self):
         try:
+            logger.info("Starting matchmaking process")
             self.token_data = await self.create_token()
             if not self.token_data or not self.bearer:
+                logger.error("Failed to authenticate")
                 return {"status": "error", "message": "Failed to authenticate"}
             await self.client_credentials()
             if not self.client_credentials_token:
+                logger.error("Failed to get client credentials")
                 return {"status": "error", "message": "Failed to get client credentials"}
             self.netcl = await self.get_netcl()
             if not self.netcl:
+                logger.error("Failed to fetch netcl")
                 return {"status": "error", "message": "Failed to fetch netcl"}
             is_banned = await self.check_matchmaking_ban()
             if is_banned:
+                logger.error("Client is banned from matchmaking")
                 return {"status": "error", "message": "The client is currently banned from matchmaking"}
             self.party_id = await self.create_party()
             if not self.party_id:
+                logger.error("Failed to create party")
                 return {"status": "error", "message": "Failed to create party"}
             payload, signature = await self.generate_ticket()
             if not payload or not signature:
+                logger.error("Failed to generate matchmaking ticket")
                 return {"status": "error", "message": "Failed to generate matchmaking ticket"}
             checksum = self.calculate_checksum(payload, signature)
             if not checksum:
+                logger.error("Failed to calculate checksum")
                 return {"status": "error", "message": "Failed to calculate checksum"}
             return await self.connect_websocket(payload, signature, checksum)
         except Exception as e:
-            print(f"An error occurred in start: {e}")
+            logger.error(f"An error occurred in start: {e}")
             return {"status": "error", "message": f"Failed to start matchmaking: {str(e)}"}
 
 # Discord Bot Setup
@@ -290,16 +314,18 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f"Bot logged in as {bot.user}")
+    logger.info(f"Bot logged in as {bot.user}")
 
 @bot.command(name='startcustom')
 async def start_custom(ctx, link_code=None):
     if link_code is None:
         link_code = os.getenv("LINK_CODE", "abc123")
     if not (6 <= len(link_code) <= 12 and link_code.isalnum()):
+        logger.error(f"Invalid link code: {link_code}")
         await ctx.send("Error: Link code must be 6-12 alphanumeric characters.")
         return
     playlist = os.getenv("PLAYLIST", "Playlist_ShowdownAlt_Solo")
+    logger.info(f"Starting custom match with link code: {link_code}, playlist: {playlist}")
     mms = DontMessWithMMS(
         account_ids=["ced24960d641410390aef731202c0ae2"],
         client_id="ced24960d641410390aef731202c0ae2",
@@ -312,13 +338,15 @@ async def start_custom(ctx, link_code=None):
     )
     result = await mms.start()
     if result["status"] == "error" and "Failed to create party" in result["message"]:
-        print(f"Retrying with fallback playlist: Playlist_DefaultSolo")
+        logger.info(f"Retrying with fallback playlist: Playlist_DefaultSolo")
         mms.playlist = "Playlist_DefaultSolo"
         result = await mms.start()
+    logger.info(f"Custom match result: {result['message']}")
     await ctx.send(f"Custom match status: {result['message']}")
 
 # Web Server to Keep Render Happy
 async def health_check(request):
+    logger.info("Health check requested")
     return web.json_response({"status": "ok"})
 
 app = web.Application()
@@ -329,7 +357,9 @@ async def start_web_and_bot():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000)))
     await site.start()
+    logger.info("Web server started")
     await bot.start(os.getenv("DISCORD_TOKEN"))
 
 if __name__ == "__main__":
+    logger.info("Starting application")
     asyncio.run(start_web_and_bot())
