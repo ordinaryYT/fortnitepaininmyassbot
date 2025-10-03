@@ -30,7 +30,7 @@ class DontMessWithMMS:
         self.exchange_code = kwargs.pop('exchange_code', None)
         self.playlist = kwargs.pop('playlist', None)
         self.party_id = kwargs.pop('party_id', None)  # ✅ must already exist
-        self.region = kwargs.pop('region', "EU").lower()
+        self.region = kwargs.pop('region', "EU").upper()  # ✅ enforce uppercase
         self.fill = "true" if kwargs.pop('fill', None) else "false"
         self.client_id = kwargs.pop('client_id', None)
         self.bearer = kwargs.pop('bearer', None)
@@ -100,7 +100,8 @@ class DontMessWithMMS:
         return None
 
     async def set_presence(self):
-        url = f"https://presence-public-service-prod.ol.epicgames.com/presence/api/v1/{self.client_id}/presence"
+        # ✅ Correct endpoint with namespace "fortnite"
+        url = f"https://presence-public-service-prod.ol.epicgames.com/presence/api/v1/fortnite/{self.client_id}/presence"
         headers = {
             "Authorization": f"bearer {self.bearer}",
             "Content-Type": "application/json"
@@ -198,7 +199,6 @@ class DontMessWithMMS:
                 return {"status": "error", "message": "The client is currently banned from matchmaking"}
             await self.set_presence()
 
-            # 🚨 Skip create_party, rely on an existing one
             if not self.party_id:
                 return {"status": "error", "message": "No party_id provided. Join or create a party first."}
 
@@ -230,7 +230,7 @@ async def start_custom(ctx, link_code=None, party_id=None):
         await ctx.send("Error: Link code must be 6-12 alphanumeric characters.")
         return
     if party_id is None:
-        party_id = os.getenv("PARTY_ID")  # ✅ supply your existing party_id here
+        party_id = os.getenv("PARTY_ID")
     if not party_id:
         await ctx.send("Error: No party_id provided.")
         return
@@ -244,7 +244,7 @@ async def start_custom(ctx, link_code=None, party_id=None):
         playlist=playlist,
         link_code=link_code,
         region=os.getenv("REGION", "EU"),
-        party_id=party_id,  # ✅ use existing party
+        party_id=party_id,
         fill=False
     )
     result = await mms.start()
