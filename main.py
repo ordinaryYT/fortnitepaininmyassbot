@@ -29,7 +29,7 @@ class DontMessWithMMS:
         self.account_ids = ",".join(kwargs.pop('account_ids', []))
         self.exchange_code = kwargs.pop('exchange_code', None)
         self.playlist = kwargs.pop('playlist', None)
-        self.party_id = kwargs.pop('party_id', None)
+        self.party_id = kwargs.pop('party_id', None)  # ✅ must already exist
         self.region = kwargs.pop('region', "EU").lower()
         self.fill = "true" if kwargs.pop('fill', None) else "false"
         self.client_id = kwargs.pop('client_id', None)
@@ -119,68 +119,6 @@ class DontMessWithMMS:
                 logger.info(f"Presence update: status {response.status}")
                 if response.status != 200:
                     logger.error(await response.text())
-
-    async def create_party(self):
-        endpoint = "https://party-service-prod.ol.epicgames.com/party/api/v1/Fortnite/parties"
-        payload = {
-            "config": {
-                "join_confirmation": False,
-                "joinability": "OPEN",
-                "max_size": 16,
-                "chat_enabled": True,
-                "discoverability": "ALL",
-                "sub_type": "default",
-                "type": "DEFAULT",
-                "invite_ttl_seconds": 14400,
-                "join_in_progress_enabled": True
-            },
-            "members": [
-                {
-                    "account_id": self.client_id,
-                    "meta": {
-                        "urn:epic:member:dn_s": self.client_id,
-                        "urn:epic:member:platform_s": "WIN",
-                        "urn:epic:member:platform_version_s": f"++Fortnite+Release-{self.build_version}",
-                        "urn:epic:member:build_s": f"{self.build_version}-CL-1234567"
-                    },
-                    "role": "CAPTAIN",
-                    "revision": 0
-                }
-            ],
-            "join_info": {
-                "connection": {
-                    "id": self.client_id,
-                    "meta": {
-                        "urn:epic:conn:platform_s": "WIN",
-                        "urn:epic:conn:type_s": "game",
-                        "urn:epic:conn:build_s": f"{self.build_version}-CL-1234567"
-                    }
-                },
-                "meta": {
-                    "urn:epic:member:platform_s": "WIN"
-                }
-            },
-            "meta": {
-                "urn:epic:cfg:build-id_s": f"{self.build_version}-CL-1234567",
-                "urn:epic:cfg:privacy_s": "PUBLIC"
-            }
-        }
-        headers = {
-            "Authorization": f"bearer {self.bearer}",
-            "Content-Type": "application/json",
-            "User-Agent": f"Fortnite/{self.build_version} Windows/10",
-            "X-Epic-Device-ID": self.device_id
-        }
-        async with aiohttp.ClientSession() as session:
-            async with session.post(endpoint, json=payload, headers=headers) as response:
-                logger.info(f"Party creation: status {response.status}")
-                if response.status == 200:
-                    data = await response.json()
-                    self.party_id = data['id']
-                    return self.party_id
-                else:
-                    logger.error(await response.text())
-        return None
     def calculate_checksum(self, ticket_payload, signature):
         if not ticket_payload or not signature:
             logger.error("Cannot calculate checksum: ticket_payload or signature is None")
@@ -258,10 +196,12 @@ class DontMessWithMMS:
                 return {"status": "error", "message": "Failed to fetch netcl"}
             if await self.check_matchmaking_ban():
                 return {"status": "error", "message": "The client is currently banned from matchmaking"}
-            await self.set_presence()  # ✅ correct presence endpoint
-            self.party_id = await self.create_party()
+            await self.set_presence()
+
+            # 🚨 Skip create_party, rely on an existing one
             if not self.party_id:
-                return {"status": "error", "message": "Failed to create party"}
+                return {"status": "error", "message": "No party_id provided. Join or create a party first."}
+
             payload, signature = await self.generate_ticket()
             if not payload or not signature:
                 return {"status": "error", "message": "Failed to generate matchmaking ticket"}
@@ -283,12 +223,18 @@ async def on_ready():
     logger.info(f"Bot logged in as {bot.user}")
 
 @bot.command(name='startcustom')
-async def start_custom(ctx, link_code=None):
+async def start_custom(ctx, link_code=None, party_id=None):
     if link_code is None:
         link_code = os.getenv("LINK_CODE", "abc123")
     if not (6 <= len(link_code) <= 12 and link_code.isalnum()):
         await ctx.send("Error: Link code must be 6-12 alphanumeric characters.")
         return
+    if party_id is None:
+        party_id = os.getenv("PARTY_ID")  # ✅ supply your existing party_id here
+    if not party_id:
+        await ctx.send("Error: No party_id provided.")
+        return
+
     playlist = os.getenv("PLAYLIST", "Playlist_DefaultSolo")
     mms = DontMessWithMMS(
         account_ids=["ced24960d641410390aef731202c0ae2"],
@@ -298,6 +244,7 @@ async def start_custom(ctx, link_code=None):
         playlist=playlist,
         link_code=link_code,
         region=os.getenv("REGION", "EU"),
+        party_id=party_id,  # ✅ use existing party
         fill=False
     )
     result = await mms.start()
