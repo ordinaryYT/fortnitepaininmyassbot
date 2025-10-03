@@ -99,6 +99,27 @@ class DontMessWithMMS:
                     logger.error(await response.text())
         return None
 
+    async def set_presence(self):
+        url = f"https://friends-public-service-prod.ol.epicgames.com/friends/api/v1/{self.client_id}/presence"
+        headers = {
+            "Authorization": f"bearer {self.bearer}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "status": "Playing",
+            "bIsPlaying": True,
+            "bIsJoinable": True,
+            "bHasVoiceSupport": False,
+            "productName": "Fortnite",
+            "sessionId": "",
+            "properties": {}
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers) as response:
+                logger.info(f"Presence update: status {response.status}")
+                if response.status != 200:
+                    logger.error(await response.text())
+
     async def create_party(self):
         endpoint = "https://party-service-prod.ol.epicgames.com/party/api/v1/Fortnite/parties"
         payload = {
@@ -237,6 +258,7 @@ class DontMessWithMMS:
                 return {"status": "error", "message": "Failed to fetch netcl"}
             if await self.check_matchmaking_ban():
                 return {"status": "error", "message": "The client is currently banned from matchmaking"}
+            await self.set_presence()  # ✅ make sure account is online before creating party
             self.party_id = await self.create_party()
             if not self.party_id:
                 return {"status": "error", "message": "Failed to create party"}
