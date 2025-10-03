@@ -127,7 +127,10 @@ class DontMessWithMMS:
         return None
 
     async def create_party(self):
-        url = "https://party-service-prod01.ol.epicgames.com/party/api/v1/parties"
+        endpoints = [
+            "https://party-service-prod.ol.epicgames.com/party/api/v1/parties",
+            "https://party-service-prod02.ol.epicgames.com/party/api/v1/parties"
+        ]
         payload = {
             "config": {
                 "join_confirmation": False,
@@ -171,26 +174,28 @@ class DontMessWithMMS:
             "Content-Type": "application/json",
             "User-Agent": f"Fortnite/37.30 Windows/10"
         }
-        for attempt in range(3):
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, headers=headers) as response:
-                        logger.info(f"Party creation attempt {attempt + 1}: status {response.status}")
-                        if response.status == 200:
-                            data = await response.json()
-                            self.party_id = data['id']
-                            logger.info(f"Created new party ID: {self.party_id} (build: {self.build_version})")
-                            return self.party_id
-                        else:
-                            error_text = await response.text()
-                            logger.error(f"Party creation failed: {response.status} - {error_text}")
-                            if response.status == 429:
-                                await asyncio.sleep(5 * (attempt + 1))
+        for endpoint in endpoints:
+            for attempt in range(3):
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(endpoint, json=payload, headers=headers) as response:
+                            logger.info(f"Party creation attempt {attempt + 1} at {endpoint}: status {response.status}")
+                            if response.status == 200:
+                                data = await response.json()
+                                self.party_id = data['id']
+                                logger.info(f"Created new party ID: {self.party_id} (build: {self.build_version})")
+                                return self.party_id
                             else:
-                                break
-            except Exception as e:
-                logger.error(f"Failed to create party (attempt {attempt + 1}): {e}")
-                await asyncio.sleep(5 * (attempt + 1))
+                                error_text = await response.text()
+                                logger.error(f"Party creation failed at {endpoint}: {response.status} - {error_text}")
+                                if response.status == 429:
+                                    await asyncio.sleep(5 * (attempt + 1))
+                                else:
+                                    break
+                except Exception as e:
+                    logger.error(f"Failed to create party at {endpoint} (attempt {attempt + 1}): {e}")
+                    await asyncio.sleep(5 * (attempt + 1))
+        logger.error("All party creation endpoints failed")
         return None
 
     def calculate_checksum(self, ticket_payload, signature):
@@ -325,7 +330,7 @@ async def start_custom(ctx, link_code=None):
         logger.error(f"Invalid link code: {link_code}")
         await ctx.send("Error: Link code must be 6-12 alphanumeric characters.")
         return
-    playlist = os.getenv("PLAYLIST", "Playlist_ShowdownAlt_Solo")
+    playlist = os.getenv("PLAYLIST", "Playlist_DefaultSolo")
     logger.info(f"Starting custom match with link code: {link_code}, playlist: {playlist}")
     mms = DontMessWithMMS(
         account_ids=["ced24960d641410390aef731202c0ae2"],
@@ -338,10 +343,6 @@ async def start_custom(ctx, link_code=None):
         fill=False
     )
     result = await mms.start()
-    if result["status"] == "error" and "Failed to create party" in result["message"]:
-        logger.info(f"Retrying with fallback playlist: Playlist_DefaultSolo")
-        mms.playlist = "Playlist_DefaultSolo"
-        result = await mms.start()
     logger.info(f"Custom match result: {result['message']}")
     await ctx.send(f"Custom match status: {result['message']}")
 
