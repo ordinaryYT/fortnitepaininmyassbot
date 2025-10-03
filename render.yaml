@@ -17,6 +17,9 @@ services:
       - key: LINK_CODE
         sync: false  # Set manually in Render Dashboard
       - key: PLAYLIST
-        value: NeonCustomsSolo  # Updated for 2025
+        value: playlist_defaultsolo
       - key: REGION
         value: EU
+    disks:
+      - name: logs
+        mountPath: /opt/render/project/src
