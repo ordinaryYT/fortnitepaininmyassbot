@@ -4,11 +4,12 @@ import asyncio
 import logging
 import discord
 from discord.ext import commands
+from aiohttp import web
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("fortnite-bot")
 
-# ===== ENV VARIABLES =====
+# === ENV VARS ===
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 ACCOUNT_ID    = os.getenv("ACCOUNT_ID")
 DEVICE_ID     = os.getenv("DEVICE_ID")
@@ -17,14 +18,15 @@ LINK_CODE     = os.getenv("LINK_CODE")
 PARTY_ID      = os.getenv("PARTY_ID")
 PLAYLIST      = os.getenv("PLAYLIST", "playlist_defaultsolo")
 REGION        = os.getenv("REGION", "EU")
+PORT          = int(os.getenv("PORT", 10000))  # Render expects this
 
-# Fortnite client base64 (fixed)
-FORTNITE_AUTH = "ZWM2ODRiOGM2ODdmNDc5ZmFkZWEzY2IyYWQ4M2Y1YzY6ZTFmMzFjMjExZjI4NDEzMTg2MjYyZDM3ZjlmNmY5YzY="
+# Fortnite client base64 (always the same)
+CLIENT_AUTH = "ZWM2ODRiOGM2ODdmNDc5ZmFkZWEzY2IyYWQ4M2Y1YzY6ZTFmMzFjMjExZjI4NDEzMTg2MjYyZDM3ZjlmNmY5YzY="
 
 OAUTH_URL = "https://account-public-service-prod.ol.epicgames.com/account/api/oauth/token"
 MMS_URL   = "https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice"
 
-# ===== DISCORD BOT =====
+# Discord bot
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -40,7 +42,7 @@ class FortniteClient:
     async def create_token(self):
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "Authorization": f"basic {FORTNITE_AUTH}"
+            "Authorization": f"basic {CLIENT_AUTH}"
         }
         data = {
             "grant_type": "device_auth",
@@ -77,12 +79,13 @@ class FortniteClient:
         async with self.client.post(url, headers=headers, params=params) as resp:
             text = await resp.text()
             if resp.status == 200:
-                logger.info("✅ Ticket requested")
                 self.ticket_info = await resp.json()
+                logger.info("✅ Ticket requested")
                 return self.ticket_info
             else:
                 logger.error(f"❌ Ticket request failed {resp.status}: {text}")
                 raise Exception("Ticket error")
+
     async def start_match(self):
         if not self.ticket_info:
             raise Exception("No ticket available, run !startcustom first")
@@ -95,7 +98,7 @@ class FortniteClient:
         async with self.client.post(url, headers=headers) as resp:
             text = await resp.text()
             if resp.status == 200:
-                logger.info("✅ Match started")
+                logger.info("🚀 Match started")
                 return await resp.json()
             else:
                 logger.error(f"❌ Failed to start match {resp.status}: {text}")
@@ -105,14 +108,12 @@ class FortniteClient:
         if self.client:
             await self.client.close()
 
-
 fortnite = FortniteClient()
 
-
+# === Discord Events & Commands ===
 @bot.event
 async def on_ready():
     logger.info(f"Bot logged in as {bot.user}")
-
 
 @bot.command(name="startcustom")
 async def start_custom(ctx):
@@ -123,7 +124,6 @@ async def start_custom(ctx):
     except Exception as e:
         await ctx.send(f"❌ Failed: {e}")
 
-
 @bot.command(name="start")
 async def start(ctx):
     try:
@@ -132,15 +132,28 @@ async def start(ctx):
     except Exception as e:
         await ctx.send(f"❌ Failed to start: {e}")
 
+# === Healthcheck server for Render ===
+async def handle(request):
+    return web.Response(text="Fortnite bot running!")
 
-async def main():
+async def start_servers():
     await fortnite.init()
+
+    # Start aiohttp webserver on Render's PORT
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logger.info(f"✅ Web server running on port {PORT}")
+
+    # Start Discord bot
     async with bot:
         await bot.start(DISCORD_TOKEN)
 
-
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(start_servers())
     except KeyboardInterrupt:
         asyncio.run(fortnite.close())
