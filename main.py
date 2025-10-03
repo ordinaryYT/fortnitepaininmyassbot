@@ -57,12 +57,7 @@ class DontMessWithMMS:
                             logger.info(f"Fetched netcl: {self.netcl}")
                             return self.netcl
                         else:
-                            error_text = await response.text()
-                            logger.error(f"Netcl fetch failed: {response.status} - {error_text}")
-                            if response.status == 429:
-                                await asyncio.sleep(5 * (attempt + 1))
-                            else:
-                                break
+                            logger.error(await response.text())
             except Exception as e:
                 logger.error(f"Failed to get netcl (attempt {attempt + 1}): {e}")
                 await asyncio.sleep(5 * (attempt + 1))
@@ -72,20 +67,15 @@ class DontMessWithMMS:
         url = "https://account-public-service-prod.ol.epicgames.com/account/api/oauth/token"
         payload = {"grant_type": "client_credentials"}
         headers = {"Authorization": f"Basic {LAUNCHER_TOKEN}", "Content-Type": "application/x-www-form-urlencoded"}
-        for attempt in range(3):
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, data=payload, headers=headers) as response:
-                        logger.info(f"Client credentials attempt {attempt + 1}: status {response.status}")
-                        if response.status == 200:
-                            data = await response.json()
-                            self.client_credentials_token = data['access_token']
-                            logger.info("Fetched client credentials token")
-                            return data
-                        else:
-                            logger.error(await response.text())
-            except Exception as e:
-                logger.error(f"Failed to get client credentials (attempt {attempt + 1}): {e}")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data=payload, headers=headers) as response:
+                logger.info(f"Client credentials: status {response.status}")
+                if response.status == 200:
+                    data = await response.json()
+                    self.client_credentials_token = data['access_token']
+                    return data
+                else:
+                    logger.error(await response.text())
         return None
 
     async def create_token(self):
@@ -99,12 +89,11 @@ class DontMessWithMMS:
         headers = {"Authorization": f"Basic {ANDROID_TOKEN}", "Content-Type": "application/x-www-form-urlencoded"}
         async with aiohttp.ClientSession() as session:
             async with session.post(url, data=payload, headers=headers) as response:
-                logger.info(f"Token creation attempt: status {response.status}")
+                logger.info(f"Token creation: status {response.status}")
                 if response.status == 200:
                     data = await response.json()
                     self.bearer = data['access_token']
                     self.client_id = data['account_id']
-                    logger.info("Fetched bearer token")
                     return data
                 else:
                     logger.error(await response.text())
@@ -134,17 +123,22 @@ class DontMessWithMMS:
                         "urn:epic:member:build_s": f"{self.build_version}-CL-1234567"
                     },
                     "role": "CAPTAIN",
-                    "revision": 0,
-                    "connection": {
-                        "id": self.client_id,
-                        "connected_at": "2025-10-03T00:00:00.000Z",
-                        "meta": {
-                            "urn:epic:conn:platform_s": "WIN",
-                            "urn:epic:conn:build_s": f"{self.build_version}-CL-1234567"
-                        }
-                    }
+                    "revision": 0
                 }
             ],
+            "join_info": {
+                "connection": {
+                    "id": self.client_id,
+                    "meta": {
+                        "urn:epic:conn:platform_s": "WIN",
+                        "urn:epic:conn:type_s": "game",
+                        "urn:epic:conn:build_s": f"{self.build_version}-CL-1234567"
+                    }
+                },
+                "meta": {
+                    "urn:epic:member:platform_s": "WIN"
+                }
+            },
             "meta": {
                 "urn:epic:cfg:build-id_s": f"{self.build_version}-CL-1234567",
                 "urn:epic:cfg:privacy_s": "PUBLIC"
@@ -158,11 +152,10 @@ class DontMessWithMMS:
         }
         async with aiohttp.ClientSession() as session:
             async with session.post(endpoint, json=payload, headers=headers) as response:
-                logger.info(f"Party creation attempt: status {response.status}")
+                logger.info(f"Party creation: status {response.status}")
                 if response.status == 200:
                     data = await response.json()
                     self.party_id = data['id']
-                    logger.info(f"Created new party ID: {self.party_id}")
                     return self.party_id
                 else:
                     logger.error(await response.text())
@@ -191,7 +184,7 @@ class DontMessWithMMS:
         }
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
-                logger.info(f"Ticket generation attempt: status {response.status}")
+                logger.info(f"Ticket generation: status {response.status}")
                 if response.status == 200:
                     data = await response.json()
                     return data['payload'], data['signature']
