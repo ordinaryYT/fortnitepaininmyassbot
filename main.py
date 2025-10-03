@@ -100,7 +100,7 @@ class DontMessWithMMS:
         return None
 
     async def set_presence(self):
-        url = f"https://friends-public-service-prod.ol.epicgames.com/friends/api/v1/{self.client_id}/presence"
+        url = f"https://presence-public-service-prod.ol.epicgames.com/presence/api/v1/{self.client_id}/presence"
         headers = {
             "Authorization": f"bearer {self.bearer}",
             "Content-Type": "application/json"
@@ -258,7 +258,7 @@ class DontMessWithMMS:
                 return {"status": "error", "message": "Failed to fetch netcl"}
             if await self.check_matchmaking_ban():
                 return {"status": "error", "message": "The client is currently banned from matchmaking"}
-            await self.set_presence()  # ✅ make sure account is online before creating party
+            await self.set_presence()  # ✅ correct presence endpoint
             self.party_id = await self.create_party()
             if not self.party_id:
                 return {"status": "error", "message": "Failed to create party"}
