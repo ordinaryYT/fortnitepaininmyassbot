@@ -1,3 +1,5 @@
+import sys
+import aiohttp
 from aiohttp import ClientSession, web
 import websockets
 import hashlib
@@ -27,11 +29,15 @@ class DontMessWithMMS:
         self.device_id = kwargs.pop('device_id', None)
         self.secret = kwargs.pop('secret', None)
         self.link_code = kwargs.pop('link_code', None)
+        print(f"Initialized MMS: client_id={self.client_id}, playlist={self.playlist}, region={self.region}, link_code={self.link_code}")
+        sys.stdout.flush()
 
     async def get_user_agent(self):
+        print("Fetching user agent...")
+        sys.stdout.flush()
         url = "https://launcher-public-service-prod08.ol.epicgames.com/Fortnite/api/game/v2/fortnite/platform/Windows/namespace/fn/catalogItem/4fe75bbc5a674f4f9b356b5c90567da5/app/Fortnite/label/Live"
         headers = {"Authorization": f"bearer {self.client_credentials_token}"}
-        for attempt in range(3):  # Retry up to 3 times
+        for attempt in range(3):
             try:
                 async with ClientSession() as session:
                     async with session.get(url, headers=headers) as response:
@@ -39,19 +45,27 @@ class DontMessWithMMS:
                             data = await response.json()
                             buildVersion = data["elements"][0]["buildVersion"][:-8]
                             print(f"Fetched build version: {buildVersion}")
+                            sys.stdout.flush()
                             return f"Fortnite/{buildVersion} Windows/10", buildVersion
                         else:
-                            print(f"User agent fetch failed: {response.status} - {await response.text()}")
-                            if response.status == 429:  # Rate limit
+                            error_text = await response.text()
+                            print(f"User agent fetch failed (attempt {attempt + 1}): {response.status} - {error_text}")
+                            sys.stdout.flush()
+                            if response.status == 429:
                                 await asyncio.sleep(5 * (attempt + 1))
                             else:
                                 break
             except Exception as e:
-                print(f"Failed to get user agent (attempt {attempt + 1}): {e}")
+                print(f"User agent exception (attempt {attempt + 1}): {e}")
+                sys.stdout.flush()
                 await asyncio.sleep(5 * (attempt + 1))
+        print("Failed to fetch user agent after retries")
+        sys.stdout.flush()
         return None, None
 
     async def get_netcl(self):
+        print("Fetching netcl...")
+        sys.stdout.flush()
         url = "https://fortnite-public-service-prod11.ol.epicgames.com/fortnite/api/matchmaking/session/matchMakingRequest"
         payload = {"criteria": [], "openPlayersRequired": 1, "buildUniqueId": "", "maxResults": 1}
         headers = {"Authorization": f"bearer {self.bearer}", "Content-Type": "application/json"}
@@ -63,19 +77,27 @@ class DontMessWithMMS:
                             data = await response.json()
                             self.netcl = data[0]["buildUniqueId"]
                             print(f"Fetched netcl: {self.netcl}")
+                            sys.stdout.flush()
                             return self.netcl
                         else:
-                            print(f"Netcl fetch failed: {response.status} - {await response.text()}")
+                            error_text = await response.text()
+                            print(f"Netcl fetch failed (attempt {attempt + 1}): {response.status} - {error_text}")
+                            sys.stdout.flush()
                             if response.status == 429:
                                 await asyncio.sleep(5 * (attempt + 1))
                             else:
                                 break
             except Exception as e:
-                print(f"Failed to get netcl (attempt {attempt + 1}): {e}")
+                print(f"Netcl exception (attempt {attempt + 1}): {e}")
+                sys.stdout.flush()
                 await asyncio.sleep(5 * (attempt + 1))
+        print("Failed to fetch netcl after retries")
+        sys.stdout.flush()
         return None
 
     async def client_credentials(self):
+        print("Fetching client credentials...")
+        sys.stdout.flush()
         url = "https://account-public-service-prod.ol.epicgames.com/account/api/oauth/token"
         payload = {"grant_type": "client_credentials"}
         headers = {"Authorization": f"Basic {LAUNCHER_TOKEN}", "Content-Type": "application/x-www-form-urlencoded"}
@@ -87,19 +109,31 @@ class DontMessWithMMS:
                             data = await response.json()
                             self.client_credentials_token = data['access_token']
                             print("Fetched client credentials token")
+                            sys.stdout.flush()
                             return data
                         else:
-                            print(f"Client credentials failed: {response.status} - {await response.text()}")
+                            error_text = await response.text()
+                            print(f"Client credentials failed (attempt {attempt + 1}): {response.status} - {error_text}")
+                            sys.stdout.flush()
                             if response.status == 429:
                                 await asyncio.sleep(5 * (attempt + 1))
                             else:
                                 break
             except Exception as e:
-                print(f"Failed to get client credentials (attempt {attempt + 1}): {e}")
+                print(f"Client credentials exception (attempt {attempt + 1}): {e}")
+                sys.stdout.flush()
                 await asyncio.sleep(5 * (attempt + 1))
+        print("Failed to fetch client credentials after retries")
+        sys.stdout.flush()
         return None
 
     async def create_token(self):
+        print("Creating bearer token...")
+        sys.stdout.flush()
+        if not all([self.client_id, self.device_id, self.secret]):
+            print(f"Invalid auth params: client_id={self.client_id}, device_id={self.device_id}, secret={'set' if self.secret else None}")
+            sys.stdout.flush()
+            return None
         url = "https://account-public-service-prod.ol.epicgames.com/account/api/oauth/token"
         payload = {
             "grant_type": "device_auth",
@@ -117,22 +151,31 @@ class DontMessWithMMS:
                             self.bearer = data['access_token']
                             self.client_id = data['account_id']
                             print("Fetched bearer token")
+                            sys.stdout.flush()
                             return data
                         else:
-                            print(f"Token creation failed: {response.status} - {await response.text()}")
+                            error_text = await response.text()
+                            print(f"Token creation failed (attempt {attempt + 1}): {response.status} - {error_text}")
+                            sys.stdout.flush()
                             if response.status == 429:
                                 await asyncio.sleep(5 * (attempt + 1))
                             else:
                                 break
             except Exception as e:
-                print(f"Failed to get access token (attempt {attempt + 1}): {e}")
+                print(f"Token creation exception (attempt {attempt + 1}): {e}")
+                sys.stdout.flush()
                 await asyncio.sleep(5 * (attempt + 1))
+        print("Failed to fetch bearer token after retries")
+        sys.stdout.flush()
         return None
 
     async def create_party(self):
+        print("Creating party...")
+        sys.stdout.flush()
         user_agent, build_version = await self.get_user_agent()
         if not build_version:
             print("Could not fetch build version for party creation")
+            sys.stdout.flush()
             return None
         url = "https://party-service-prod.ol.epicgames.com/party/api/v1/parties"
         payload = {
@@ -169,41 +212,55 @@ class DontMessWithMMS:
                             data = await response.json()
                             self.party_id = data['Id']
                             print(f"Created new party ID: {self.party_id} (build: {build_version})")
+                            sys.stdout.flush()
                             return self.party_id
                         else:
                             error_text = await response.text()
-                            print(f"Party creation failed: {response.status} - {error_text}")
+                            print(f"Party creation failed (attempt {attempt + 1}): {response.status} - {error_text}")
+                            sys.stdout.flush()
                             if response.status == 429:
                                 await asyncio.sleep(5 * (attempt + 1))
                             else:
                                 break
             except Exception as e:
-                print(f"Failed to create party (attempt {attempt + 1}): {e}")
+                print(f"Party creation exception (attempt {attempt + 1}): {e}")
+                sys.stdout.flush()
                 await asyncio.sleep(5 * (attempt + 1))
+        print("Failed to create party after retries")
+        sys.stdout.flush()
         return None
 
     def calculate_checksum(self, ticket_payload, signature):
+        print(f"Calculating checksum: payload={ticket_payload[:20] if ticket_payload else None}, signature={signature[:20] if signature else None}")
+        sys.stdout.flush()
         if not ticket_payload or not signature:
             print("Cannot calculate checksum: ticket_payload or signature is None")
+            sys.stdout.flush()
             return None
         try:
             plaintext = ticket_payload[10:20] + "Don'tMessWithMMS" + signature[2:10]
             data = plaintext.encode('utf-16le')
             sha1_hash = hashlib.sha1(data).digest()
             checksum = sha1_hash[2:10].hex().upper()
+            print(f"Checksum calculated: {checksum}")
+            sys.stdout.flush()
             return checksum
         except Exception as e:
-            print(f"Failed to calculate checksum: {e}")
+            print(f"Checksum exception: {e}")
+            sys.stdout.flush()
             return None
 
     async def generate_ticket(self):
+        print(f"Generating ticket: client_id={self.client_id}, netcl={self.netcl}, party_id={self.party_id}, playlist={self.playlist}, region={self.region}, link_code={self.link_code}")
+        sys.stdout.flush()
         if not all([self.client_id, self.netcl, self.party_id, self.bearer, self.link_code, self.playlist, self.region]):
             missing = [k for k, v in {"client_id": self.client_id, "netcl": self.netcl, "party_id": self.party_id, "bearer": self.bearer, "link_code": self.link_code, "playlist": self.playlist, "region": self.region}.items() if not v]
             print(f"Cannot generate ticket: missing fields {missing}")
+            sys.stdout.flush()
             return None, None
         try:
             url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}?partyPlayerIds={self.account_ids}&bucketId={self.netcl}:1:{self.region}:{self.playlist}&player.platform=Windows&player.subregions=DE,GB,FR&player.option.linkCode={self.link_code}&player.option.fillTeam={self.fill}&player.option.preserveSquad=false&player.option.crossplayOptOut=false&player.option.partyId={self.party_id}&player.option.splitScreen=false&party.WIN=true&input.KBM=true&player.input=KBM&player.option.microphoneEnabled=true&player.option.uiLanguage=en"
-            headers = {"User-Agent": (await self.get_user_agent())[0], "Authorization": f"bearer {self.bearer}"}
+            headers = {"User-Agent": (await self.get_user_agent())[0] or "Fortnite/37.40 Windows/10", "Authorization": f"bearer {self.bearer}"}
             async with ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
                     if response.status == 200:
@@ -211,74 +268,115 @@ class DontMessWithMMS:
                         payload = data['payload']
                         signature = data['signature']
                         print("Generated matchmaking ticket")
+                        sys.stdout.flush()
                         return payload, signature
                     else:
                         error_text = await response.text()
                         print(f"Ticket generation failed: {response.status} - {error_text}")
+                        sys.stdout.flush()
                         return None, None
         except Exception as e:
-            print(f"Failed to generate ticket: {e}")
+            print(f"Ticket generation exception: {e}")
+            sys.stdout.flush()
             return None, None
 
     async def connect_websocket(self, payload, signature, checksum):
+        print(f"Connecting WebSocket: payload={payload[:20] if payload else None}, signature={signature[:20] if signature else None}, checksum={checksum}")
+        sys.stdout.flush()
         if not all([payload, signature, checksum]):
             print(f"Cannot connect WebSocket: invalid inputs (payload: {payload}, signature: {signature}, checksum: {checksum})")
+            sys.stdout.flush()
             return {"status": "error", "message": "Invalid ticket data"}
         headers = {"Authorization": f"Epic-Signed mms-player {payload} {signature} {checksum}"}
         uri = f"wss://fortnite-matchmaking-public-service-live-{self.region}.ol.epicgames.com:443"
         try:
             async with websockets.connect(uri, extra_headers=headers) as ws:
                 print("WebSocket connection opened")
+                sys.stdout.flush()
                 async for message in ws:
-                    parsed = ast.literal_eval(message)
-                    if parsed["name"] == "Play":
-                        print("Matchmaking process successful")
-                        return {"status": "success", "message": f"Custom match started with link code: {self.link_code} (party: {self.party_id})"}
-                    else:
-                        print(f"WebSocket message: {message}")
-                        return {"status": "info", "message": message}
+                    try:
+                        parsed = ast.literal_eval(message)
+                        if parsed["name"] == "Play":
+                            print("Matchmaking process successful")
+                            sys.stdout.flush()
+                            return {"status": "success", "message": f"Custom match started with link code: {self.link_code} (party: {self.party_id})"}
+                        else:
+                            print(f"WebSocket message: {message}")
+                            sys.stdout.flush()
+                            return {"status": "info", "message": message}
+                    except Exception as e:
+                        print(f"WebSocket message parsing failed: {e}")
+                        sys.stdout.flush()
+                        return {"status": "error", "message": f"WebSocket error: {e}"}
         except Exception as e:
-            print(f"Failed to connect websocket: {e}")
-            return {"status": "error", "message": str(e)}
+            print(f"WebSocket connection failed: {e}")
+            sys.stdout.flush()
+            return {"status": "error", "message": f"WebSocket connection failed: {e}"}
 
     async def check_matchmaking_ban(self):
+        print("Checking matchmaking ban...")
+        sys.stdout.flush()
         url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}"
-        headers = {"User-Agent": (await self.get_user_agent())[0], "Authorization": f"bearer {self.bearer}"}
+        headers = {"User-Agent": (await self.get_user_agent())[0] or "Fortnite/37.40 Windows/10", "Authorization": f"bearer {self.bearer}"}
         try:
             async with ClientSession() as session:
                 async with session.get(url, headers=headers) as response:
                     data = await response.json()
-                    return data.get("errorCode", None) == "errors.com.epicgames.fortnite.player_banned_from_sub_game"
+                    banned = data.get("errorCode", None) == "errors.com.epicgames.fortnite.player_banned_from_sub_game"
+                    print(f"Ban check result: {'Banned' if banned else 'Not banned'}")
+                    sys.stdout.flush()
+                    return banned
         except Exception as e:
-            print(f"Failed to check ban status: {e}")
+            print(f"Ban check exception: {e}")
+            sys.stdout.flush()
             return False
 
     async def start(self):
+        print("Starting matchmaking process...")
+        sys.stdout.flush()
         try:
             self.token_data = await self.create_token()
             if not self.token_data or not self.bearer:
+                print("Start failed: no bearer token")
+                sys.stdout.flush()
                 return {"status": "error", "message": "Failed to authenticate"}
             await self.client_credentials()
             if not self.client_credentials_token:
+                print("Start failed: no client credentials token")
+                sys.stdout.flush()
                 return {"status": "error", "message": "Failed to get client credentials"}
             self.netcl = await self.get_netcl()
             if not self.netcl:
+                print("Start failed: no netcl")
+                sys.stdout.flush()
                 return {"status": "error", "message": "Failed to fetch netcl"}
             is_banned = await self.check_matchmaking_ban()
             if is_banned:
+                print("Start failed: account banned")
+                sys.stdout.flush()
                 return {"status": "error", "message": "The client is currently banned from matchmaking"}
             self.party_id = await self.create_party()
             if not self.party_id:
+                print("Start failed: no party ID")
+                sys.stdout.flush()
                 return {"status": "error", "message": "Failed to create party"}
             payload, signature = await self.generate_ticket()
             if not payload or not signature:
+                print("Start failed: no ticket payload/signature")
+                sys.stdout.flush()
                 return {"status": "error", "message": "Failed to generate matchmaking ticket"}
             checksum = self.calculate_checksum(payload, signature)
             if not checksum:
+                print("Start failed: no checksum")
+                sys.stdout.flush()
                 return {"status": "error", "message": "Failed to calculate checksum"}
-            return await self.connect_websocket(payload, signature, checksum)
+            result = await self.connect_websocket(payload, signature, checksum)
+            print(f"Start result: {result}")
+            sys.stdout.flush()
+            return result
         except Exception as e:
-            print(f"An error occurred in start: {e}")
+            print(f"Start exception: Cannot serialize non-str key None - {e}")
+            sys.stdout.flush()
             return {"status": "error", "message": f"Cannot serialize non-str key None: {str(e)}"}
 
 # Discord Bot Setup
@@ -289,16 +387,20 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 @bot.event
 async def on_ready():
     print(f"Bot logged in as {bot.user}")
+    sys.stdout.flush()
 
 @bot.command(name='startcustom')
 async def start_custom(ctx, link_code=None):
+    print(f"Received !startcustom command with link_code={link_code}")
+    sys.stdout.flush()
     if link_code is None:
         link_code = os.getenv("LINK_CODE", "abc123")
     if not (6 <= len(link_code) <= 12 and link_code.isalnum()):
+        print("Invalid link code")
+        sys.stdout.flush()
         await ctx.send("Error: Link code must be 6-12 alphanumeric characters.")
         return
-    # Try primary playlist, fallback if it fails
-    playlist = os.getenv("PLAYLIST", "NeonCustomsSolo")
+    playlist = os.getenv("PLAYLIST", "Playlist_DefaultSolo")
     mms = DontMessWithMMS(
         account_ids=["ced24960d641410390aef731202c0ae2"],
         client_id="ced24960d641410390aef731202c0ae2",
@@ -310,26 +412,40 @@ async def start_custom(ctx, link_code=None):
         fill=False
     )
     result = await mms.start()
-    # Fallback to alternative playlist if ticket generation fails
     if result["status"] == "error" and "Failed to generate matchmaking ticket" in result["message"]:
         print(f"Retrying with fallback playlist: ShowdownUtilitySoloCustom")
+        sys.stdout.flush()
         mms.playlist = "ShowdownUtilitySoloCustom"
         result = await mms.start()
     await ctx.send(f"Custom match status: {result['message']}")
+    print(f"Sent response: {result['message']}")
+    sys.stdout.flush()
 
 # Web Server to Keep Render Happy
 async def health_check(request):
+    print("Health check requested")
+    sys.stdout.flush()
     return web.json_response({"status": "ok"})
 
 app = web.Application()
 app.router.add_get('/health', health_check)
 
 async def start_web_and_bot():
+    print("Starting web server and bot...")
+    sys.stdout.flush()
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', int(os.getenv("PORT", 10000)))
     await site.start()
+    print("Web server started")
+    sys.stdout.flush()
     await bot.start(os.getenv("DISCORD_TOKEN"))
 
 if __name__ == "__main__":
-    asyncio.run(start_web_and_bot())
+    print("Main script starting...")
+    sys.stdout.flush()
+    try:
+        asyncio.run(start_web_and_bot())
+    except Exception as e:
+        print(f"Main exception: {e}")
+        sys.stdout.flush()
