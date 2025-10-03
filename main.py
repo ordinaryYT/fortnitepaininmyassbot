@@ -67,6 +67,7 @@ class DontMessWithMMS:
                 logger.error(f"Failed to get netcl (attempt {attempt + 1}): {e}")
                 await asyncio.sleep(5 * (attempt + 1))
         return None
+
     async def client_credentials(self):
         url = "https://account-public-service-prod.ol.epicgames.com/account/api/oauth/token"
         payload = {"grant_type": "client_credentials"}
@@ -166,8 +167,96 @@ class DontMessWithMMS:
                 else:
                     logger.error(await response.text())
         return None
+    def calculate_checksum(self, ticket_payload, signature):
+        if not ticket_payload or not signature:
+            logger.error("Cannot calculate checksum: ticket_payload or signature is None")
+            return None
+        try:
+            plaintext = ticket_payload[10:20] + "Don'tMessWithMMS" + signature[2:10]
+            data = plaintext.encode('utf-16le')
+            sha1_hash = hashlib.sha1(data).digest()
+            return sha1_hash[2:10].hex().upper()
+        except Exception as e:
+            logger.error(f"Failed to calculate checksum: {e}")
+            return None
 
-    # (rest of the class unchanged: calculate_checksum, generate_ticket, connect_websocket, etc.)
+    async def generate_ticket(self):
+        if not all([self.client_id, self.netcl, self.party_id, self.bearer, self.link_code, self.playlist, self.region]):
+            logger.error("Missing required fields for ticket generation")
+            return None, None
+        url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}?partyPlayerIds={self.account_ids}&bucketId={self.netcl}:1:{self.region}:{self.playlist}&player.platform=Windows&player.option.linkCode={self.link_code}&player.option.partyId={self.party_id}"
+        headers = {
+            "User-Agent": f"Fortnite/{self.build_version} Windows/10",
+            "Authorization": f"bearer {self.bearer}"
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                logger.info(f"Ticket generation attempt: status {response.status}")
+                if response.status == 200:
+                    data = await response.json()
+                    return data['payload'], data['signature']
+                else:
+                    logger.error(await response.text())
+                    return None, None
+
+    async def connect_websocket(self, payload, signature, checksum):
+        if not all([payload, signature, checksum]):
+            return {"status": "error", "message": "Invalid ticket data"}
+        headers = {"Authorization": f"Epic-Signed mms-player {payload} {signature} {checksum}"}
+        uri = f"wss://fortnite-matchmaking-public-service-live-{self.region}.ol.epicgames.com:443"
+        try:
+            async with websockets.connect(uri, extra_headers=headers) as ws:
+                logger.info("WebSocket connection opened")
+                async for message in ws:
+                    parsed = ast.literal_eval(message)
+                    if parsed.get("name") == "Play":
+                        logger.info("Matchmaking process successful")
+                        return {"status": "success", "message": f"Custom match started with link code: {self.link_code} (party: {self.party_id})"}
+                    else:
+                        return {"status": "info", "message": message}
+        except Exception as e:
+            logger.error(f"Failed to connect websocket: {e}")
+            return {"status": "error", "message": str(e)}
+
+    async def check_matchmaking_ban(self):
+        url = f"https://fngw-mcp-gc-livefn.ol.epicgames.com/fortnite/api/game/v2/matchmakingservice/ticket/player/{self.client_id}"
+        headers = {
+            "User-Agent": f"Fortnite/{self.build_version} Windows/10",
+            "Authorization": f"bearer {self.bearer}"
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                logger.info(f"Ban check: status {response.status}")
+                data = await response.json()
+                return data.get("errorCode") == "errors.com.epicgames.fortnite.player_banned_from_sub_game"
+
+    async def start(self):
+        try:
+            logger.info("Starting matchmaking process")
+            self.token_data = await self.create_token()
+            if not self.token_data or not self.bearer:
+                return {"status": "error", "message": "Failed to authenticate"}
+            await self.client_credentials()
+            if not self.client_credentials_token:
+                return {"status": "error", "message": "Failed to get client credentials"}
+            self.netcl = await self.get_netcl()
+            if not self.netcl:
+                return {"status": "error", "message": "Failed to fetch netcl"}
+            if await self.check_matchmaking_ban():
+                return {"status": "error", "message": "The client is currently banned from matchmaking"}
+            self.party_id = await self.create_party()
+            if not self.party_id:
+                return {"status": "error", "message": "Failed to create party"}
+            payload, signature = await self.generate_ticket()
+            if not payload or not signature:
+                return {"status": "error", "message": "Failed to generate matchmaking ticket"}
+            checksum = self.calculate_checksum(payload, signature)
+            if not checksum:
+                return {"status": "error", "message": "Failed to calculate checksum"}
+            return await self.connect_websocket(payload, signature, checksum)
+        except Exception as e:
+            logger.error(f"An error occurred in start: {e}")
+            return {"status": "error", "message": str(e)}
 
 # Discord Bot Setup
 intents = discord.Intents.default()
