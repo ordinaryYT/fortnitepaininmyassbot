@@ -126,90 +126,6 @@ class DontMessWithMMS:
                 await asyncio.sleep(5 * (attempt + 1))
         return None
 
-    async def create_party(self):
-        endpoints = [
-            "https://party-service-prod.ol.epicgames.com/party/api/v1/parties",
-            "https://groups-service-prod06.ol.epicgames.com/groups/api/v1/groups/in/fortnite"
-        ]
-        headers = {
-            "Authorization": f"bearer {self.bearer}",
-            "Content-Type": "application/json",
-            "User-Agent": f"Fortnite/37.30 Windows/10"
-        }
-        # Payload for party-service
-        party_payload = {
-            "config": {
-                "join_confirmation": False,
-                "joinability": "OPEN",
-                "max_size": 16,
-                "chat_enabled": True,
-                "discoverability": "ALL",
-                "sub_type": "default",
-                "type": "DEFAULT",
-                "invite_ttl_seconds": 14400,
-                "join_in_progress_enabled": True
-            },
-            "members": [
-                {
-                    "account_id": self.client_id,
-                    "meta": {
-                        "urn:epic:member:dn_s": self.client_id,
-                        "urn:epic:member:platform_s": "WIN",
-                        "urn:epic:member:platform_version_s": f"++Fortnite+Release-{self.build_version}",
-                        "urn:epic:member:build_s": f"{self.build_version}-CL-1234567"
-                    },
-                    "role": "CAPTAIN",
-                    "revision": 0,
-                    "connection": {
-                        "id": self.client_id,
-                        "connected_at": "2025-10-06T00:00:00.000Z",
-                        "meta": {
-                            "urn:epic:conn:platform_s": "WIN",
-                            "urn:epic:conn:build_s": f"{self.build_version}-CL-1234567"
-                        }
-                    }
-                }
-            ],
-            "meta": {
-                "urn:epic:cfg:build-id_s": f"{self.build_version}-CL-1234567",
-                "urn:epic:cfg:privacy_s": "PUBLIC"
-            }
-        }
-        # Payload for groups-service (CreateGroupRequest)
-        group_payload = {
-            "type": "KAIROS",
-            "name": f"CustomMatch_{self.link_code}",
-            "description": "Custom Fortnite match",
-            "max_members": 16,
-            "joinability": "OPEN",
-            "discoverability": "ALL"
-        }
-        for endpoint in endpoints:
-            payload = group_payload if "groups-service" in endpoint else party_payload
-            logger.info(f"Trying party creation at {endpoint} with payload: {json.dumps(payload, indent=2)}")
-            for attempt in range(3):
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(endpoint, json=payload, headers=headers) as response:
-                            logger.info(f"Party creation attempt {attempt + 1} at {endpoint}: status {response.status}")
-                            if response.status == 200:
-                                data = await response.json()
-                                self.party_id = data['id'] if "groups-service" in endpoint else data['id']
-                                logger.info(f"Created new party ID: {self.party_id} (build: {self.build_version})")
-                                return self.party_id
-                            else:
-                                error_text = await response.text()
-                                logger.error(f"Party creation failed at {endpoint}: {response.status} - {error_text}")
-                                if response.status == 429:
-                                    await asyncio.sleep(5 * (attempt + 1))
-                                else:
-                                    break
-                except Exception as e:
-                    logger.error(f"Failed to create party at {endpoint} (attempt {attempt + 1}): {e}")
-                    await asyncio.sleep(5 * (attempt + 1))
-        logger.error("All party creation endpoints failed")
-        return None
-
     def calculate_checksum(self, ticket_payload, signature):
         if not ticket_payload or not signature:
             logger.error("Cannot calculate checksum: ticket_payload or signature is None")
@@ -292,6 +208,10 @@ class DontMessWithMMS:
     async def start(self):
         try:
             logger.info("Starting matchmaking process")
+            if not self.party_id:
+                logger.error("No party ID provided")
+                return {"status": "error", "message": "Party ID is required"}
+            logger.info(f"Using party ID: {self.party_id}")
             self.token_data = await self.create_token()
             if not self.token_data or not self.bearer:
                 logger.error("Failed to authenticate")
@@ -308,10 +228,6 @@ class DontMessWithMMS:
             if is_banned:
                 logger.error("Client is banned from matchmaking")
                 return {"status": "error", "message": "The client is currently banned from matchmaking"}
-            self.party_id = await self.create_party()
-            if not self.party_id:
-                logger.error("Failed to create party")
-                return {"status": "error", "message": "Failed to create party"}
             payload, signature = await self.generate_ticket()
             if not payload or not signature:
                 logger.error("Failed to generate matchmaking ticket")
@@ -340,16 +256,22 @@ async def ping(ctx):
     await ctx.send("Pong!")
 
 @bot.command(name='startcustom')
-async def start_custom(ctx, link_code=None):
-    logger.info(f"Received !startcustom command from {ctx.author} with link_code: {link_code}")
+async def start_custom(ctx, link_code=None, party_id=None):
+    logger.info(f"Received !startcustom command from {ctx.author} with link_code: {link_code}, party_id: {party_id}")
     if link_code is None:
         link_code = os.getenv("LINK_CODE", "abc123")
     if not (6 <= len(link_code) <= 12 and link_code.isalnum()):
         logger.error(f"Invalid link code: {link_code}")
         await ctx.send("Error: Link code must be 6-12 alphanumeric characters.")
         return
+    if party_id is None:
+        party_id = os.getenv("PARTY_ID")
+    if not party_id or not (len(party_id) >= 8 and party_id.isalnum()):
+        logger.error(f"Invalid or missing party ID: {party_id}")
+        await ctx.send("Error: Party ID must be provided via command or PARTY_ID env var and be at least 8 alphanumeric characters.")
+        return
     playlist = os.getenv("PLAYLIST", "Playlist_DefaultSolo")
-    logger.info(f"Starting custom match with link code: {link_code}, playlist: {playlist}")
+    logger.info(f"Starting custom match with link code: {link_code}, playlist: {playlist}, party_id: {party_id}")
     mms = DontMessWithMMS(
         account_ids=["ced24960d641410390aef731202c0ae2"],
         client_id="ced24960d641410390aef731202c0ae2",
@@ -357,6 +279,7 @@ async def start_custom(ctx, link_code=None):
         secret=os.getenv("SECRET"),
         playlist=playlist,
         link_code=link_code,
+        party_id=party_id,
         region=os.getenv("REGION", "EU"),
         fill=False
     )
