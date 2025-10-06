@@ -16,7 +16,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('app.log')  # Save logs to file for Render
+        logging.FileHandler('app.log')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -128,11 +128,16 @@ class DontMessWithMMS:
 
     async def create_party(self):
         endpoints = [
-            "https://party-service-prod06.ol.epicgames.com/party/api/v1/parties",
             "https://party-service-prod.ol.epicgames.com/party/api/v1/parties",
-            "https://party-service-prod02.ol.epicgames.com/party/api/v1/parties"
+            "https://groups-service-prod06.ol.epicgames.com/groups/api/v1/groups/in/fortnite"
         ]
-        payload = {
+        headers = {
+            "Authorization": f"bearer {self.bearer}",
+            "Content-Type": "application/json",
+            "User-Agent": f"Fortnite/37.30 Windows/10"
+        }
+        # Payload for party-service
+        party_payload = {
             "config": {
                 "join_confirmation": False,
                 "joinability": "OPEN",
@@ -170,12 +175,18 @@ class DontMessWithMMS:
                 "urn:epic:cfg:privacy_s": "PUBLIC"
             }
         }
-        headers = {
-            "Authorization": f"bearer {self.bearer}",
-            "Content-Type": "application/json",
-            "User-Agent": f"Fortnite/37.30 Windows/10"
+        # Payload for groups-service (CreateGroupRequest)
+        group_payload = {
+            "type": "KAIROS",
+            "name": f"CustomMatch_{self.link_code}",
+            "description": "Custom Fortnite match",
+            "max_members": 16,
+            "joinability": "OPEN",
+            "discoverability": "ALL"
         }
         for endpoint in endpoints:
+            payload = group_payload if "groups-service" in endpoint else party_payload
+            logger.info(f"Trying party creation at {endpoint} with payload: {json.dumps(payload, indent=2)}")
             for attempt in range(3):
                 try:
                     async with aiohttp.ClientSession() as session:
@@ -183,7 +194,7 @@ class DontMessWithMMS:
                             logger.info(f"Party creation attempt {attempt + 1} at {endpoint}: status {response.status}")
                             if response.status == 200:
                                 data = await response.json()
-                                self.party_id = data['id']
+                                self.party_id = data['id'] if "groups-service" in endpoint else data['id']
                                 logger.info(f"Created new party ID: {self.party_id} (build: {self.build_version})")
                                 return self.party_id
                             else:
@@ -201,7 +212,7 @@ class DontMessWithMMS:
 
     def calculate_checksum(self, ticket_payload, signature):
         if not ticket_payload or not signature:
-            logger.error("Cannot calculate checksum:意的 ticket_payload or signature is None")
+            logger.error("Cannot calculate checksum: ticket_payload or signature is None")
             return None
         try:
             plaintext = ticket_payload[10:20] + "Don'tMessWithMMS" + signature[2:10]
@@ -323,8 +334,14 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 async def on_ready():
     logger.info(f"Bot logged in as {bot.user}")
 
+@bot.command(name='ping')
+async def ping(ctx):
+    logger.info("Ping command received")
+    await ctx.send("Pong!")
+
 @bot.command(name='startcustom')
 async def start_custom(ctx, link_code=None):
+    logger.info(f"Received !startcustom command from {ctx.author} with link_code: {link_code}")
     if link_code is None:
         link_code = os.getenv("LINK_CODE", "abc123")
     if not (6 <= len(link_code) <= 12 and link_code.isalnum()):
